@@ -1,13 +1,7 @@
 from matplotlib import pyplot as plt
 import pretty_midi
+import numpy as np
 
-midi = pretty_midi.PrettyMIDI("data/maestro-v3.0.0/2004/MIDI-Unprocessed_SMF_02_R1_2004_01-05_ORIG_MID--AUDIO_02_R1_2004_05_Track05_wav.midi")
-
-for instrument in midi.instruments:
-    print(f"Instrument: {instrument.name}, Notes: {len(instrument.notes)}")
-    for note in instrument.notes[:10]:
-        print(f"  pitch={note.pitch}, start={note.start:.2f}, end={note.end:.2f}, velocity={note.velocity}")
-print(midi.get_end_time())
 
 # piano_roll = midi.get_piano_roll(fs=1)
 # plt.figure(figsize=(14, 4))
@@ -16,16 +10,34 @@ print(midi.get_end_time())
 # plt.ylabel('Pitch')
 # plt.show()
 
-import subprocess
+# for testing purposes
+def create_and_play_audio(filepath = "data/maestro-v3.0.0/2018/MIDI-Unprocessed_Chamber2_MID--AUDIO_09_R3_2018_wav--1.midi", output_file = "output.wav"):
+    import subprocess
+    subprocess.run([
+        'fluidsynth',
+        '-ni',                          # -n: no MIDI input, -i: no interactive shell
+        '-g', '1.0',                    # gain
+        '-F', output_file,  # write to file
+        'data/GeneralUser-GS/GeneralUser-GS.sf2',
+        filepath
+    ])
+
+    subprocess.run(['afplay', output_file])
+
+def midi_to_notes(filepath = "data/maestro-v3.0.0/2018/MIDI-Unprocessed_Chamber2_MID--AUDIO_09_R3_2018_wav--1.midi"):
+    midi_client = pretty_midi.PrettyMIDI(filepath)
+    notes = []
+    for instr in midi_client.instruments:
+        for note in instr.notes:
+            notes.append([note.start, note.end, note.pitch, note.velocity])
+    return notes
+
+def notes_to_vector(notes):
+    # row is a note, cols are the data points
+    return np.array(notes)
 
 
-subprocess.run([
-    'fluidsynth',
-    '-ni',                          # -n: no MIDI input, -i: no interactive shell
-    '-g', '1.0',                    # gain
-    '-F', 'output.wav',  # write to file
-    'data/GeneralUser-GS/GeneralUser-GS.sf2',
-    'data/maestro-v3.0.0/2018/MIDI-Unprocessed_Chamber2_MID--AUDIO_09_R3_2018_wav--1.midi'
-])
-
-subprocess.run(['afplay', 'output.wav'])  # macOS
+if __name__ == "__main__":
+    notes = midi_to_notes()
+    vector = notes_to_vector(notes)
+    print(vector)

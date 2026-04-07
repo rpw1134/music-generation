@@ -30,8 +30,7 @@ src/midi_gen/
 ├── generate.py         # autoregressive sampling
 ├── midi_utils.py       # token sequence → MIDI → WAV
 └── serve/
-    ├── api.py
-    └── static/         # frontend
+    └── api.py
 ```
 
 ## Data
