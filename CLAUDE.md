@@ -36,4 +36,5 @@ src/midi_gen/
 
 ## Data
 MAESTRO v3 — https://magenta.tensorflow.org/datasets/maestro
-Start with a small subset (100–200 files) for fast iteration.
+Start with a small subset (100–200 files) for fast iteration.<br>
+Uses GeneralUser-GS soundfont
