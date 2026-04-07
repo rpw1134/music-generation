@@ -17,5 +17,5 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/music_gen"]
+packages = ["src/midi_gen"]
 
