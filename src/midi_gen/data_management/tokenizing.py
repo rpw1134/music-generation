@@ -4,7 +4,27 @@ from midi_gen.data_management.parsing import file_path_to_vector
 TEST_MAX_SEQ_LENGTH = 1024
 VOCAB = {"<PAD>": 0, "<SOS>": 1, "<EOS>": 2}
 
-def get_time_shift_bin(t, begin=0.01, end=1, bins=100):
+def create_vocabulary(bins=157, pitches=128, velocities=32):
+    vocabulary = {"<PAD>": 0, "<SOS>": 1, "<EOS>": 2}
+    inverse = ["PAD", "SOS", "EOS"]
+    curr = 3
+    for i in range(bins):
+        vocabulary[f"<TIME_SHIFT_{i}>"] = curr
+        inverse.append(f"TIME_SHIFT_{i}")
+        curr += 1
+    for i in range(pitches):
+        vocabulary[f"<PITCH_{i+1}>"] = curr
+        inverse.append(f"PITCH_{i+1}")
+        curr+=1
+    for i in range(velocities):
+        vocabulary[f"<VELOCITY_{i+1}>"] = curr
+        inverse.append(f"VELOCITY_{i+1}")
+        curr+=1
+    return vocabulary, inverse
+
+def get_time_shift_bin(t, begin=0.01, end=1.0, bins=157):
+    """Map a time shift value (seconds) to a list of log-scale bin indices.
+    Values exceeding end are split into multiple tokens."""
     # recursively split if necessary
     if t > end:
         div = t/end
@@ -19,7 +39,8 @@ def get_time_shift_bin(t, begin=0.01, end=1, bins=100):
     bin_idx = round(np.log(t / begin) / log_ratio)
     return [min(bin_idx, bins - 1)]
 
-def get_time_shift_by_bin(indices, begin=0.01, end=1, bins=100):
+def get_time_shift_by_bin(indices, begin=0.01, end=1.0, bins=157):
+    """Inverse of get_time_shift_bin. Convert bin indices back to time shift values (seconds)."""
     # indices is a list of time shift indices to compute for
     return [begin * (end/begin)**(i/bins) for i in indices]
 
@@ -35,7 +56,16 @@ def tokenize_sample(file_path: str) -> np.ndarray:
         notes.append((start, "on", pitch, pitch))
         notes.append((end, "off", pitch, pitch))
     notes.sort(key=lambda x: (x[0], x[3]))
-    print(notes)
+    print(notes[:12])
+    curr_time = 0
+    tokens = []
+    for note in notes:
+        time, event, velocity, pitch = note
+        if time-curr_time > 0.005:
+            time_shifts = get_time_shift_by_bin(get_time_shift_bin(curr_time))
+            for time_shift in time_shifts:
+                tokens.append()
+
 
 
 
