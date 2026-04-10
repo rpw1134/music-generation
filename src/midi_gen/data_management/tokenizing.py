@@ -183,10 +183,17 @@ def tokenize_file(file_path: str, bins=157, pitches=128, velocities=32) -> np.nd
     events = notes_to_events(vec)
     return events_to_token_array(events, bins=bins, pitches=pitches, velocities=velocities)
 
-def tokenize_dataset(glob_pattern: str, bins=157, pitches=128, velocities=32) -> np.ndarray:
+def tokenize_dataset(glob_pattern: str, bins=157, pitches=128, velocities=32, seq_length=1024) -> np.ndarray:
     files = sorted(Path(DATA_DIR).glob(glob_pattern))
-    arrays = [tokenize_file(str(file), bins, pitches, velocities) for file in files]
-    return np.concatenate(arrays, axis=0)
+    arrays = np.concatenate([tokenize_file(str(f), bins, pitches, velocities) for f in files], axis=0)
+    remainder = len(arrays) % seq_length
+    if remainder != 0:
+        arrays = np.concatenate([arrays, np.zeros(seq_length - remainder, dtype=np.int32)])
+    return arrays.reshape(-1, seq_length)
+
 
 if __name__ == "__main__":
-    pass
+    from .midi_io import save_vector_to_file
+    arr = tokenize_dataset("maestro-v3.0.0/**/*.midi")
+    print(arr.shape)
+    save_vector_to_file(DATA_DIR / "tokenized_dataset.npy", arr)
