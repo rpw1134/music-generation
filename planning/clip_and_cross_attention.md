@@ -14,6 +14,17 @@ and the text "turbulent, dark, dramatic" end up near each other in this space.
 
 This makes CLIP embeddings ideal as conditioning signals: they encode *vibe*, not structure.
 
+### You Don't Train CLIP
+
+OpenAI released CLIP weights publicly. You load a frozen pretrained encoder and use it as a
+feature extractor — you never retrain it. The only parameters you train are the parts of your
+decoder that learn to interpret CLIP's output (cross-attention projection weights, and optionally
+a small connector MLP).
+
+A typical connector is just a single linear layer mapping CLIP's output dim (e.g., 512) to your
+model's hidden dim. This is all you need to start. Training this alongside cross-attention while
+CLIP stays frozen is low-cost even on a laptop GPU.
+
 ---
 
 ## Self-Attention vs. Cross-Attention
@@ -34,6 +45,27 @@ Cross-attention:   Q        ← music tokens
 ```
 
 The mechanics are identical — scaled dot-product attention — only the source of K and V differs.
+
+### They Stack — Self-Attention Is Not Replaced
+
+Cross-attention does not replace self-attention. A decoder block contains both, applied in order:
+
+```
+x = x + self_attention(x)           # attend to previous music tokens (causal mask applied)
+x = x + cross_attention(x, image)   # attend to image embedding
+x = x + feed_forward(x)
+```
+
+Sequential context — everything that came before in the music sequence — flows through
+self-attention exactly as in a standard GPT decoder. Cross-attention is an additional sublayer
+that runs after, injecting the image signal into an already-context-aware representation.
+
+At each generation step the current token has both:
+- Full causal context from all prior music tokens (self-attention)
+- Image conditioning injected at every layer (cross-attention)
+
+Self-attention answers "what has happened so far in the music?" Cross-attention answers "given
+the image, what should happen next?" Both signals combine before the final token prediction.
 
 ---
 
