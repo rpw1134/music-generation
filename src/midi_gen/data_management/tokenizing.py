@@ -1,5 +1,9 @@
 import numpy as np
 from collections import defaultdict
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent  # music-gen/
+DATA_DIR = PROJECT_ROOT / "data"
 
 # Vocabulary layout: 157 TIME_SHIFT + 128 ON + 128 OFF + 32 VELOCITY + 3 special = 448 tokens
 TEST_MAX_SEQ_LENGTH = 1024
@@ -130,27 +134,30 @@ def reconstruct_notes(token_strings: list[str]) -> tuple[list[tuple], list[dict]
     return notes, errors
 
 
-def tokenize_file(file_path: str, bins=157, pitches=128, velocities=32) -> np.ndarray:
-    """Tokenize a single MIDI file into a 1D array of integer token indices.
+def notes_to_events(vec) -> list[tuple]:
+    """Expand a raw note matrix (Nx4) into a sorted list of (time, event, velocity, pitch) tuples.
 
-    Intended to be called on every file in the dataset. The resulting arrays
-    can be concatenated and split into fixed-length windows for training.
+    Each note produces three events: a velocity event and a note-on at start time,
+    and a note-off at end time. Events are sorted by time, then pitch.
     """
-    from midi_gen.data_management.midi_io import file_path_to_vector
-    vocab, _ = create_vocabulary(bins=bins, pitches=pitches, velocities=velocities)
-    vec = file_path_to_vector(file_path)
-    notes = []
+    events = []
     for note in vec:
         start, end, pitch, velocity = note
         pitch = int(pitch)
         velocity = quantize_velocity(int(velocity))
-        notes.append((start, "velocity", velocity, pitch))
-        notes.append((start, "on", pitch, pitch))
-        notes.append((end, "off", pitch, pitch))
-    notes.sort(key=lambda x: (x[0], x[3]))
+        events.append((start, "velocity", velocity, pitch))
+        events.append((start, "on", pitch, pitch))
+        events.append((end, "off", pitch, pitch))
+    events.sort(key=lambda x: (x[0], x[3]))
+    return events
+
+
+def events_to_token_array(events: list[tuple], bins=157, pitches=128, velocities=32) -> np.ndarray:
+    """Convert a sorted event list into a 1D array of integer token indices."""
+    vocab, _ = create_vocabulary(bins=bins, pitches=pitches, velocities=velocities)
     curr_time = 0
     tokens = [vocab["<SOS>"]]
-    for time, event, velocity, pitch in notes:
+    for time, event, velocity, pitch in events:
         if time - curr_time > 0.005:
             for bin_idx in get_time_shift_bin(time - curr_time, bins=bins):
                 tokens.append(vocab[f"<TIME_SHIFT_{bin_idx}>"])
@@ -164,6 +171,22 @@ def tokenize_file(file_path: str, bins=157, pitches=128, velocities=32) -> np.nd
     tokens.append(vocab["<EOS>"])
     return np.array(tokens, dtype=np.int32)
 
+
+def tokenize_file(file_path: str, bins=157, pitches=128, velocities=32) -> np.ndarray:
+    """Tokenize a single MIDI file into a 1D array of integer token indices.
+
+    Intended to be called on every file in the dataset. The resulting arrays
+    can be concatenated and split into fixed-length windows for training.
+    """
+    from midi_gen.data_management.midi_io import file_path_to_vector
+    vec = file_path_to_vector(file_path)
+    events = notes_to_events(vec)
+    return events_to_token_array(events, bins=bins, pitches=pitches, velocities=velocities)
+
+def tokenize_dataset(glob_pattern: str, bins=157, pitches=128, velocities=32) -> np.ndarray:
+    files = sorted(Path(DATA_DIR).glob(glob_pattern))
+    arrays = [tokenize_file(str(file), bins, pitches, velocities) for file in files]
+    return np.concatenate(arrays, axis=0)
 
 if __name__ == "__main__":
     pass
