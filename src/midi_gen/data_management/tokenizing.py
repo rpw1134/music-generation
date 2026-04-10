@@ -130,5 +130,40 @@ def reconstruct_notes(token_strings: list[str]) -> tuple[list[tuple], list[dict]
     return notes, errors
 
 
+def tokenize_file(file_path: str, bins=157, pitches=128, velocities=32) -> np.ndarray:
+    """Tokenize a single MIDI file into a 1D array of integer token indices.
+
+    Intended to be called on every file in the dataset. The resulting arrays
+    can be concatenated and split into fixed-length windows for training.
+    """
+    from midi_gen.data_management.midi_io import file_path_to_vector
+    vocab, _ = create_vocabulary(bins=bins, pitches=pitches, velocities=velocities)
+    vec = file_path_to_vector(file_path)
+    notes = []
+    for note in vec:
+        start, end, pitch, velocity = note
+        pitch = int(pitch)
+        velocity = quantize_velocity(int(velocity))
+        notes.append((start, "velocity", velocity, pitch))
+        notes.append((start, "on", pitch, pitch))
+        notes.append((end, "off", pitch, pitch))
+    notes.sort(key=lambda x: (x[0], x[3]))
+    curr_time = 0
+    tokens = [vocab["<SOS>"]]
+    for time, event, velocity, pitch in notes:
+        if time - curr_time > 0.005:
+            for bin_idx in get_time_shift_bin(time - curr_time, bins=bins):
+                tokens.append(vocab[f"<TIME_SHIFT_{bin_idx}>"])
+            curr_time = time
+        if event == "velocity":
+            tokens.append(vocab[f"<VELOCITY_{velocity}>"])
+        elif event == "on":
+            tokens.append(vocab[f"<ON_{pitch}>"])
+        elif event == "off":
+            tokens.append(vocab[f"<OFF_{pitch}>"])
+    tokens.append(vocab["<EOS>"])
+    return np.array(tokens, dtype=np.int32)
+
+
 if __name__ == "__main__":
     pass
