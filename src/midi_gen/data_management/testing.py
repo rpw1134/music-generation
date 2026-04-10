@@ -2,6 +2,9 @@ from midi_gen.data_management.midi_io import file_path_to_vector, write_midi
 from midi_gen.data_management.tokenizing import create_vocabulary, quantize_velocity, get_time_shift_bin, reconstruct_notes
 import numpy as np
 
+from midi_gen.exploration.midi_test import create_and_play_audio
+
+
 def tokenize_sample(file_path: str) -> np.ndarray:
     """Tokenize a single MIDI file into a 1D array of integer token indices.
 
@@ -54,7 +57,6 @@ def tokenize_sample(file_path: str) -> np.ndarray:
         elif event == "off":
             tokens.append(vocab[f"<OFF_{pitch}>"])
     tokens.append(vocab["<EOS>"])
-    print(tokens)
     return np.array(tokens)
 
 def parse_tokens_to_midi(tokens, output_path: str):
@@ -73,7 +75,15 @@ def parse_tokens_to_midi(tokens, output_path: str):
         for e in errors:
             print(" ", e)
     write_midi(notes, output_path)
-    return notes
+    return notes, errors
+
+if __name__ == "__main__":
+    tokens = tokenize_sample("data/maestro-v3.0.0/2018/MIDI-Unprocessed_Chamber2_MID--AUDIO_09_R3_2018_wav--1.midi")
+    print(len(tokens))
+    notes, errors = parse_tokens_to_midi(tokens, output_path="data/midi/first_test.midi")
+    print(len(notes))
+    # create_and_play_audio("data/maestro-v3.0.0/2018/MIDI-Unprocessed_Chamber2_MID--AUDIO_09_R3_2018_wav--1.midi", output_file="data/outputs/output.wav")
+    create_and_play_audio(filepath="data/midi/first_test.midi", output_file="data/outputs/first_test.wav")
 
 
 

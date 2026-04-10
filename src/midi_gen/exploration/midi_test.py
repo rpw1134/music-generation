@@ -26,4 +26,4 @@ def create_and_play_audio(filepath = "data/maestro-v3.0.0/2018/MIDI-Unprocessed_
 
 
 if __name__ == "__main__":
-    print(vector)
+    pass
