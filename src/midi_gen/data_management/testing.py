@@ -1,5 +1,5 @@
-from midi_gen.data_management.parsing import file_path_to_vector, reconstruct_notes, write_midi
-from midi_gen.data_management.tokenizing import create_vocabulary, quantize_velocity, get_time_shift_bin
+from midi_gen.data_management.midi_io import file_path_to_vector, write_midi
+from midi_gen.data_management.tokenizing import create_vocabulary, quantize_velocity, get_time_shift_bin, reconstruct_notes
 import numpy as np
 
 def tokenize_sample(file_path: str) -> np.ndarray:
@@ -61,7 +61,7 @@ def parse_tokens_to_midi(tokens, output_path: str):
     """Decode a token index sequence back to a MIDI file.
 
     Converts indices to token strings via the inverse vocabulary, reconstructs
-    notes using the shared parsing logic in parsing.py, and writes the result.
+    notes using reconstruct_notes from tokenizing.py, and writes the result.
     Any malformed token sequences (e.g. OFF before ON) are collected as errors
     and printed rather than raising.
     """
