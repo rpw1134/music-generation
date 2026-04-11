@@ -7,26 +7,33 @@ from midi_gen.data_management.tokenizing import create_vocabulary
 from midi_gen.model.models.GPTMidiV1 import GPTMidiV1
 
 
-def _train_epoch(model, loader, optimizer, lr_sched, vocab_size, grad_clip, device):
+def _train_epoch(model, loader, optimizer, lr_sched, vocab_size, grad_clip, device, epoch, scaler):
     model.train()
     total_loss = 0
-    for x, y in loader:
+    for i, (x, y) in enumerate(loader):
         # device
         x, y = x.to(device), y.to(device)
 
-        # logits then flatten for CE loss
-        logits = model(x)
-        loss = F.cross_entropy(logits.view(-1, vocab_size), y.view(-1))
+        # mixed precision forward pass
+        with torch.autocast(device_type=device.type, dtype=torch.float16):
+            # logits then flatten for CE loss
+            logits = model(x)
+            loss = F.cross_entropy(logits.view(-1, vocab_size), y.view(-1))
 
         # backwards and clip
-        loss.backward()
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         total_loss += loss.item()
 
         # steps
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
         optimizer.zero_grad()
         lr_sched.step()
+
+        if i % 100 == 0:
+            print(f"  Epoch {epoch} Step {i}/{len(loader)} - Loss: {loss.item():.4f}")
 
     return total_loss / len(loader)
 
@@ -40,9 +47,11 @@ def _validate(model, loader, vocab_size, device):
         for x, y in loader:
             x, y = x.to(device), y.to(device)
 
-            # prediction
-            logits = model(x)
-            loss = F.cross_entropy(logits.view(-1, vocab_size), y.view(-1))
+            # mixed precision forward pass
+            with torch.autocast(device_type=device.type, dtype=torch.float16):
+                # prediction
+                logits = model(x)
+                loss = F.cross_entropy(logits.view(-1, vocab_size), y.view(-1))
 
             # tracking
             total_loss += loss.item()
@@ -105,13 +114,16 @@ def training_loop(model: nn.Module,
     # switches to cosine after warmup steps
     lr_sched = optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warmup_sched, cosine_sched], milestones=[warmup_steps])
 
+    # scales gradients to prevent underflow in float16
+    scaler = torch.cuda.GradScaler()
+
     # debugging purposes
     best_val_loss = float('inf')
     history = {"train_loss": [], "val_loss": [], "accuracy": [], "perplexity": []}
 
     for epoch in range(num_epochs):
         # TRAIN
-        train_loss = _train_epoch(model, train_loader, optimizer, lr_sched, vocab_size, grad_clip, device)
+        train_loss = _train_epoch(model, train_loader, optimizer, lr_sched, vocab_size, grad_clip, device, epoch+1, scaler)
 
         # EVAL
         val_loss, accuracy, perplexity = _validate(model, val_loader, vocab_size, device)
