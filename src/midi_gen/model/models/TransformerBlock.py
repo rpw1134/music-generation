@@ -43,16 +43,7 @@ class TransformerBlock(nn.Module):
 
         Q, K = apply_rope_transformations(Q, K)
 
-        scores = Q @ K.transpose(-2, -1) / (d_head ** 0.5)  # (batch, n_heads, seq_len, seq_len)
-
-        if self.causal:
-            mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device), diagonal=1).bool()
-            scores = scores.masked_fill(mask.unsqueeze(0).unsqueeze(0), float('-inf'))
-
-        scores = F.softmax(scores, dim=-1)
-        scores = self.dropout(scores)
-
-        out = scores @ V  # (batch, n_heads, seq_len, d_head)
+        out = F.scaled_dot_product_attention(Q, K, V, dropout_p=self.dropout.p if self.training else 0.0, is_causal=self.causal)  # (batch, n_heads, seq_len, d_head)
         out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
         out = self.out_proj(out)
 
