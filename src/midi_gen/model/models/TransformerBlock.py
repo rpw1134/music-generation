@@ -6,7 +6,7 @@ from midi_gen.model.training.positional_encodings import apply_rope_transformati
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, ff_dim_ratio=4, dropout=0.1, causal=True):
+    def __init__(self, d_model=512, num_heads=4, ff_dim_ratio=4, dropout=0.1, causal=True):
         super().__init__()
         self.num_heads = num_heads
         self.causal = causal
@@ -65,3 +65,7 @@ class TransformerBlock(nn.Module):
         x = residual + self.dropout(x)
 
         return x
+
+if __name__ == "__main__":
+    model = TransformerBlock()
+    print(sum(p.numel() for p in model.parameters()))
