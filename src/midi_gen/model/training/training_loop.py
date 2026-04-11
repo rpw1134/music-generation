@@ -115,7 +115,7 @@ def training_loop(model: nn.Module,
     lr_sched = optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warmup_sched, cosine_sched], milestones=[warmup_steps])
 
     # scales gradients to prevent underflow in float16
-    scaler = torch.cuda.GradScaler()
+    scaler = torch.amp.GradScaler()
 
     # debugging purposes
     best_val_loss = float('inf')
