@@ -52,12 +52,34 @@ def create_sample_tokens(model, max_length: int, seed: torch.Tensor | None = Non
     device = next(model.parameters()).device
     tokens = _build_seed(seed, device)
 
+    # unwrap DataParallel if needed
+    m = model.module if hasattr(model, 'module') else model
+    num_layers = len(m.transformer_blocks)
+    num_heads  = m.transformer_blocks[0].num_heads
+    d_head     = m.transformer_blocks[0].d_head
+    dtype      = next(m.parameters()).dtype
+
+    # pre-allocate fixed-size KV buffers — no allocations during the decode loop
+    kv_caches = [
+        (
+            torch.zeros(1, num_heads, max_length, d_head, dtype=dtype, device=device),
+            torch.zeros(1, num_heads, max_length, d_head, dtype=dtype, device=device),
+            0,  # filled length
+        )
+        for _ in range(num_layers)
+    ]
+
     model.eval()
     with torch.no_grad():
+        # prefill: write seed K/V into buffers, get logits for the last seed position
+        logits, kv_caches = model(tokens, use_cache=True, kv_caches=kv_caches)
+        next_token = _sample_next_token(logits[0, -1, :], temperature, top_k, top_p)
+        tokens = torch.cat([tokens, next_token.view(1, 1)], dim=1)
+
+        # decode: single token per step, in-place buffer writes, no new allocations
         while tokens.shape[1] < max_length and tokens[0, -1] != 2:
-            logits = model(tokens)           # (1, seq_len, vocab_size)
-            next_logits = logits[0, -1, :]  # logits for last position only
-            next_token = _sample_next_token(next_logits, temperature, top_k, top_p)
+            logits, kv_caches = model(tokens[:, -1:], use_cache=True, kv_caches=kv_caches)
+            next_token = _sample_next_token(logits[0, -1, :], temperature, top_k, top_p)
             tokens = torch.cat([tokens, next_token.view(1, 1)], dim=1)
 
     return tokens

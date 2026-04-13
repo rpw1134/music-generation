@@ -22,12 +22,14 @@ def generate_random_sample(
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
     # load model and weights from checkpoint
-    model = GPTMidiV1()
     checkpoint = torch.load(model_path, map_location=device)
     state_dict = checkpoint["model_state_dict"]
     # DataParallel saves weights with a "module." prefix — strip it for single-device inference
     if any(k.startswith("module.") for k in state_dict):
         state_dict = {k.removeprefix("module."): v for k, v in state_dict.items()}
+    # infer max_seq_len from the saved RoPE buffer so the model is always built correctly
+    max_seq_len = state_dict["transformer_blocks.0.rope_cos"].shape[2]
+    model = GPTMidiV1(max_seq_len=max_seq_len)
     model.load_state_dict(state_dict, strict=False)
     model.to(device)
 
@@ -52,7 +54,7 @@ def generate_random_sample(
 
 
 if __name__ == "__main__":
-    seed_np = get_seed_tokens(i=0, j=100)
+    seed_np = get_seed_tokens(i=7777, j=1024)
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     seed = torch.tensor(seed_np, dtype=torch.long).unsqueeze(0).to(device)  # (1, 50)
-    generate_random_sample("src/midi_gen/model/models/midiv1_best.pt", temperature=0.9, top_p=0.9, seed=seed)
+    generate_random_sample("src/midi_gen/model/models/midiv1_best_2.pt", temperature=0.9, top_p=0.8, max_length=2048, seed=seed)

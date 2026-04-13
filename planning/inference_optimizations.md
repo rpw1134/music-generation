@@ -29,6 +29,21 @@ At the target sequence length of 2048 tokens, this cost roughly quadruples. KV c
 
 ---
 
+### Results (post-cache, MPS, GPTMidiV1 10-epoch checkpoint)
+
+| Metric | Before | After | Improvement |
+|---|---|---|---|
+| Avg tokens generated | 890 | 843 | — |
+| Avg total time | 57.57s | 4.55s | **12.7x faster** |
+| Avg time per token | 59.0 ms | 6.3 ms | **9.4x faster** |
+| Avg tokens per second | 16.9 | 157.6 | **9.3x faster** |
+
+Two changes drove this:
+1. **KV caching** — K/V projections reduced from O(t) per step to O(1). Past token representations are computed once and reused.
+2. **Pre-allocated static buffers** — replaced `torch.cat` (which allocates a new tensor every step) with fixed `(K_buf, V_buf, length)` buffers written in-place. This eliminated 6×1024 tensor allocations per generation and gave Metal a fixed attention shape to compile a single shader for, rather than recompiling for every unique sequence length.
+
+---
+
 ### The Problem
 
 During autoregressive generation, the model produces one token at a time. At each step t, the current implementation passes the entire accumulated sequence to the model:
