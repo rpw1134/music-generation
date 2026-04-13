@@ -25,5 +25,10 @@ def create_and_play_audio(filepath = "data/maestro-v3.0.0/2018/MIDI-Unprocessed_
     subprocess.run(['afplay', output_file])
 
 
+def play_wav(filepath: str):
+    import subprocess
+    subprocess.run(['afplay', filepath])
+
+
 if __name__ == "__main__":
-    pass
+    play_wav("data/outputs/funny.wav")

@@ -41,6 +41,13 @@ The cosine LR schedule fully annealed to `eta_min=1e-5` over 10 epochs, so conti
 
 ---
 
+## Round 3 — Candidates (pending Round 2 results)
+
+### Register imbalance (investigate first)
+Generated output showed heavy upper-register bias: 84% of notes ≥ C5 vs. 34% in ground truth, mean pitch 76.2 vs. 65.6. However, this may be a consequence of the oscillating-note generation failure rather than a systematic model bias — the histogram just reflects whatever notes the model loops on. Re-run the pitch histogram diagnostic after Round 2. If the imbalance persists with otherwise better output, pursue register-aware tokenization (separate `<MELODY_ON/OFF>` and `<BASS_ON/OFF>` token types split at a pitch threshold, e.g. MIDI 60).
+
+---
+
 ## Code changes made between Round 1 and Round 2
 
 ### RoPE table moved into model (`TransformerBlock`, `positional_encodings.py`)

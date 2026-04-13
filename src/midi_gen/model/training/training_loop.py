@@ -75,7 +75,10 @@ def _save_checkpoint(model, optimizer, epoch, val_loss, path):
 
 def load_checkpoint(model, optimizer, path, device):
     checkpoint = torch.load(path, map_location=device)
-    model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+    state_dict = checkpoint["model_state_dict"]
+    if any(k.startswith("module.") for k in state_dict):
+        state_dict = {k.removeprefix("module."): v for k, v in state_dict.items()}
+    model.load_state_dict(state_dict, strict=False)
     if optimizer is not None:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     return checkpoint["epoch"], checkpoint["val_loss"]
@@ -99,6 +102,9 @@ def training_loop(model: nn.Module,
 
     # get device
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs")
+        model = torch.nn.DataParallel(model)
     model.to(device)
 
     # number of weight updates

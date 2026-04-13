@@ -24,7 +24,11 @@ def generate_random_sample(
     # load model and weights from checkpoint
     model = GPTMidiV1()
     checkpoint = torch.load(model_path, map_location=device)
-    model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+    state_dict = checkpoint["model_state_dict"]
+    # DataParallel saves weights with a "module." prefix — strip it for single-device inference
+    if any(k.startswith("module.") for k in state_dict):
+        state_dict = {k.removeprefix("module."): v for k, v in state_dict.items()}
+    model.load_state_dict(state_dict, strict=False)
     model.to(device)
 
     # generate token sequence
