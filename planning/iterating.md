@@ -27,11 +27,17 @@ The cosine LR schedule fully annealed to `eta_min=1e-5` over 10 epochs, so conti
 ## Round 2 — Extended Training Run (planned)
 
 ### Changes
-- `num_epochs`: 10 → 30
+- `num_epochs`: 10 → 25
 - `eta_min` in cosine schedule: `1e-5` → `1e-6` (more room to decay; final epochs remain useful)
+- `seq_length`: 1024 → 2048 (dataset must be re-tokenized and re-uploaded to Kaggle)
+- `max_seq_len=2048` passed to `GPTMidiV1` and through to `TransformerBlock` (RoPE buffer pre-allocated at this size)
 
 ### Motivation
-The loss curve had no plateau at epoch 10 and the model is clearly underfit. 30 epochs gives the schedule room to properly anneal and should bring perplexity down enough for musical structure to emerge.
+**More epochs:** Loss curve had no plateau at epoch 10, model clearly underfit. 25 epochs is estimated to fit within the 12-hour Kaggle limit (~2x time per epoch due to longer sequences, ~5x total vs. the original run).
+
+**Longer sequences:** 1024-token windows cover roughly 2-3 seconds of dense piano music — not enough to contain a full musical phrase (typically 4-8 bars). The model cannot learn phrase-level structure from windows that cut through phrases arbitrarily. Seeding with 100 real tokens produced zero improvement in musical coherence, confirming the model isn't learning to use long-range context. Doubling to 2048 gives the model a fighting chance to see and learn full phrases.
+
+**Flash Attention:** Already in use, so the O(n²) memory concern for longer sequences doesn't apply. Batch size stays at 32, no gradient accumulation needed.
 
 ---
 

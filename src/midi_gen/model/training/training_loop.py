@@ -84,7 +84,7 @@ def load_checkpoint(model, optimizer, path, device):
 def training_loop(model: nn.Module,
                   train_loader: DataLoader,
                   val_loader: DataLoader,
-                  num_epochs=30,
+                  num_epochs=25,
                   lr=3e-4,
                   warmup_steps=200,
                   weight_decay=0.1,

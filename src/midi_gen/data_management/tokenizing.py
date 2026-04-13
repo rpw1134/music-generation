@@ -194,6 +194,6 @@ def tokenize_dataset(glob_pattern: str, bins=157, pitches=128, velocities=32, se
 
 if __name__ == "__main__":
     from .midi_io import save_vector_to_file
-    arr = tokenize_dataset("maestro-v3.0.0/**/*.midi")
+    arr = tokenize_dataset("maestro-v3.0.0/**/*.midi", seq_length=2048)
     print(arr.shape)
-    save_vector_to_file(DATA_DIR / "tokenized_dataset.npy", arr)
+    save_vector_to_file(DATA_DIR / "tokenized_dataset_long.npy", arr)

@@ -37,3 +37,6 @@ src/midi_gen/
 MAESTRO v3 — https://magenta.tensorflow.org/datasets/maestro
 Start with a small subset (100–200 files) for fast iteration.<br>
 Uses GeneralUser-GS soundfont
+
+## Iteration Log
+Whenever changes are made to the model architecture, training configuration, tokenization, or inference pipeline — document them in `planning/iterating.md`. Include what changed, what problem motivated the change, and what the outcome was (once known).
