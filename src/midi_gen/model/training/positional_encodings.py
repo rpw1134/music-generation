@@ -17,13 +17,13 @@ def rotate_half(x):
     x2 = x[..., x.shape[-1] // 2:] # opposite, only second half of the vector
     return torch.cat([-x2, x1], dim=-1) # reverses and negates for use in angle calculation
 
-def apply_rope_transformations(Q: torch.Tensor, K: torch.Tensor, base=10000) -> Tuple[torch.Tensor, torch.Tensor]:
-    # Q and K are (batch, n_heads, seq_len, d_head)
-    seq_len, d_head = Q.shape[2], Q.shape[3]
-    # TODO: Call this in the model ONCE, not every transformation
-    cos, sin = init_cos_sin_table(seq_len, d_head, base) # (seq_len, d_head)
-    cos = cos.unsqueeze(0).unsqueeze(0).to(Q.device) # (1, 1, seq_len, d_head)
-    sin = sin.unsqueeze(0).unsqueeze(0).to(Q.device) # (1, 1, seq_len, d_head)
+def apply_rope_transformations(Q: torch.Tensor, K: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Apply RoPE to Q and K using precomputed cos/sin tables.
+
+    Args:
+        Q, K: (batch, n_heads, seq_len, d_head)
+        cos, sin: (1, 1, seq_len, d_head) — sliced from the buffer stored on the model
+    """
     Q_rotated = Q * cos + rotate_half(Q) * sin
     K_rotated = K * cos + rotate_half(K) * sin
     return Q_rotated, K_rotated

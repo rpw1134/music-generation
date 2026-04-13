@@ -5,7 +5,7 @@ from midi_gen.data_management.tokenizing import create_vocabulary
 
 class GPTMidiV1(nn.Module):
 
-    def __init__(self, vocab_len = None, d_model=512, num_heads=8, num_layers=6, ff_dim_ratio=4, dropout=0.1):
+    def __init__(self, vocab_len=None, d_model=512, num_heads=8, num_layers=6, ff_dim_ratio=4, dropout=0.1, max_seq_len=1024):
         super().__init__()
         if vocab_len is None:
             vocabulary, _ = create_vocabulary()
@@ -14,7 +14,7 @@ class GPTMidiV1(nn.Module):
         self.embedding = nn.Embedding(vocab_len, d_model)
 
         self.transformer_blocks = nn.ModuleList([
-            TransformerBlock(d_model=d_model, num_heads=num_heads, ff_dim_ratio=ff_dim_ratio, dropout=dropout, causal=True)
+            TransformerBlock(d_model=d_model, num_heads=num_heads, ff_dim_ratio=ff_dim_ratio, dropout=dropout, causal=True, max_seq_len=max_seq_len)
             for _ in range(num_layers)
         ])
 

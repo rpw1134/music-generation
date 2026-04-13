@@ -2,14 +2,19 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from midi_gen.model.training.positional_encodings import apply_rope_transformations
+from midi_gen.model.training.positional_encodings import apply_rope_transformations, init_cos_sin_table
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model=512, num_heads=4, ff_dim_ratio=4, dropout=0.1, causal=True):
+    def __init__(self, d_model=512, num_heads=4, ff_dim_ratio=4, dropout=0.1, causal=True, max_seq_len=1024):
         super().__init__()
         self.num_heads = num_heads
         self.causal = causal
+
+        d_head = d_model // num_heads
+        cos, sin = init_cos_sin_table(max_seq_len, d_head, base=10000)  # (max_seq_len, d_head)
+        self.register_buffer("rope_cos", cos.unsqueeze(0).unsqueeze(0))  # (1, 1, max_seq_len, d_head)
+        self.register_buffer("rope_sin", sin.unsqueeze(0).unsqueeze(0))
 
         self.query_proj = nn.Linear(d_model, d_model, bias=False)
         self.key_proj = nn.Linear(d_model, d_model, bias=False)
@@ -41,7 +46,9 @@ class TransformerBlock(nn.Module):
         K = K.view(batch_size, seq_len, self.num_heads, d_head).transpose(1, 2)
         V = V.view(batch_size, seq_len, self.num_heads, d_head).transpose(1, 2)
 
-        Q, K = apply_rope_transformations(Q, K)
+        cos = self.rope_cos[:, :, :seq_len, :]
+        sin = self.rope_sin[:, :, :seq_len, :]
+        Q, K = apply_rope_transformations(Q, K, cos, sin)
 
         out = F.scaled_dot_product_attention(Q, K, V, dropout_p=self.dropout.p if self.training else 0.0, is_causal=self.causal)  # (batch, n_heads, seq_len, d_head)
         out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)

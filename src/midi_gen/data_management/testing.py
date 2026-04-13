@@ -24,6 +24,22 @@ def parse_tokens_to_midi(tokens, output_path: str):
     write_midi(notes, output_path)
     return notes, errors
 
+def get_seed_tokens(i: int, j: int, dataset_path: str = "data/tokenized_dataset.npy") -> np.ndarray:
+    """Return the first j tokens from dataset row i as a seed.
+
+    Args:
+        i: row index in the dataset
+        j: number of tokens to take from the start of that row
+    """
+    arr = np.load(dataset_path, mmap_mode="r")
+    seed = arr[i, :j]
+    _, inverse = create_vocabulary()
+    token_strings = [inverse[t] for t in seed]
+    print(f"Row {i}, first {j} tokens:")
+    print(token_strings)
+    return seed
+
+
 def play_sequences(indices: list[int], dataset_path: str, midi_out: str = "data/midi/preview.midi", wav_out: str = "data/outputs/preview.wav"):
     """Grab rows by index from the dataset, concatenate, decode to MIDI, and play."""
     arr = np.load(dataset_path, mmap_mode="r")

@@ -75,7 +75,7 @@ def _save_checkpoint(model, optimizer, epoch, val_loss, path):
 
 def load_checkpoint(model, optimizer, path, device):
     checkpoint = torch.load(path, map_location=device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model.load_state_dict(checkpoint["model_state_dict"], strict=False)
     if optimizer is not None:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     return checkpoint["epoch"], checkpoint["val_loss"]
@@ -84,7 +84,7 @@ def load_checkpoint(model, optimizer, path, device):
 def training_loop(model: nn.Module,
                   train_loader: DataLoader,
                   val_loader: DataLoader,
-                  num_epochs=10,
+                  num_epochs=30,
                   lr=3e-4,
                   warmup_steps=200,
                   weight_decay=0.1,
@@ -109,7 +109,7 @@ def training_loop(model: nn.Module,
 
     # transformers better with a warmup period followed by cosine annealing
     warmup_sched = optim.lr_scheduler.LinearLR(optimizer, start_factor=1e-8, end_factor=1.0, total_iters=warmup_steps)
-    cosine_sched = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps - warmup_steps, eta_min=1e-5)
+    cosine_sched = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps - warmup_steps, eta_min=1e-6)
 
     # switches to cosine after warmup steps
     lr_sched = optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warmup_sched, cosine_sched], milestones=[warmup_steps])
