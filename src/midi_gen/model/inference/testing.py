@@ -54,7 +54,7 @@ def generate_random_sample(
 
 
 if __name__ == "__main__":
-    seed_np = get_seed_tokens(i=7777, j=1024)
+    seed_np = get_seed_tokens(i=0, j=128)
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     seed = torch.tensor(seed_np, dtype=torch.long).unsqueeze(0).to(device)  # (1, 50)
-    generate_random_sample("src/midi_gen/model/models/midiv1_best_2.pt", temperature=0.9, top_p=0.8, max_length=2048, seed=seed)
+    generate_random_sample("src/midi_gen/model/models/midiv1_best_2.pt", temperature=1.1, top_p=0.9, max_length=2048)
