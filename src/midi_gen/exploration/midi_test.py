@@ -11,7 +11,7 @@ import numpy as np
 # plt.show()
 
 # for testing purposes
-def create_and_play_audio(filepath = "data/maestro-v3.0.0/2018/MIDI-Unprocessed_Chamber2_MID--AUDIO_09_R3_2018_wav--1.midi", output_file = "output.wav"):
+def create_and_play_audio(filepath = "data/maestro-v3.0.0/2018/MIDI-Unprocessed_Chamber2_MID--AUDIO_09_R3_2018_wav--1.midi", output_file = "data/output.wav"):
     import subprocess
     subprocess.run([
         'fluidsynth',
@@ -31,4 +31,4 @@ def play_wav(filepath: str):
 
 
 if __name__ == "__main__":
-    play_wav("data/outputs/funny.wav")
+    create_and_play_audio(filepath="data/lakh_clean/Gilbert_and_Sullivan/When_a_merry_maiden_marries.mid")
