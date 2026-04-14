@@ -183,17 +183,105 @@ def tokenize_file(file_path: str, bins=157, pitches=128, velocities=32) -> np.nd
     events = notes_to_events(vec)
     return events_to_token_array(events, bins=bins, pitches=pitches, velocities=velocities)
 
-def tokenize_dataset(glob_pattern: str, bins=157, pitches=128, velocities=32, seq_length=1024) -> np.ndarray:
-    files = sorted(Path(DATA_DIR).glob(glob_pattern))
-    arrays = np.concatenate([tokenize_file(str(f), bins, pitches, velocities) for f in files], axis=0)
-    remainder = len(arrays) % seq_length
+def tokenize_dataset(source: str, bins=157, pitches=128, velocities=32, seq_length=1024) -> np.ndarray:
+    """Tokenize a collection of MIDI files into fixed-length windows.
+
+    Args:
+        source: either a glob pattern relative to DATA_DIR (e.g. "maestro/**/*.midi")
+                or an absolute path to a text file listing one MIDI path per line
+                (e.g. the output of lakh_filter.py)
+    """
+    src = Path(source) if Path(source).is_absolute() else PROJECT_ROOT / source
+    if src.suffix == '.txt':
+        def _resolve(p: str) -> Path:
+            path = Path(p)
+            return path if path.is_absolute() else PROJECT_ROOT / path
+        files = [_resolve(p) for p in src.read_text().splitlines() if p.strip()]
+    else:
+        files = sorted(Path(DATA_DIR).glob(source))
+
+    print(f"tokenize_dataset: {len(files)} files")
+    arrays = []
+    failed = []
+    for f in files:
+        try:
+            arrays.append(tokenize_file(str(f), bins, pitches, velocities))
+        except Exception as e:
+            failed.append((f, e))
+
+    if failed:
+        print(f"  Skipped {len(failed)} files that failed to parse:")
+        for f, e in failed:
+            print(f"    {f.name}: {e}")
+
+    flat = np.concatenate(arrays, axis=0)
+    remainder = len(flat) % seq_length
     if remainder != 0:
-        arrays = np.concatenate([arrays, np.zeros(seq_length - remainder, dtype=np.int32)])
-    return arrays.reshape(-1, seq_length)
+        flat = np.concatenate([flat, np.zeros(seq_length - remainder, dtype=np.int32)])
+    return flat.reshape(-1, seq_length)
+
+
+def augment_pitch(tokens: np.ndarray, shifts: list[int] | None = None, bins=157, pitches=128) -> np.ndarray:
+    """Apply pitch transposition augmentation to an already-tokenized dataset.
+
+    Each shift value produces a new copy of every sequence where all ON and OFF
+    pitch tokens are shifted by that many semitones. Sequences where any note
+    would fall outside the valid pitch range [1, 128] are silently skipped for
+    that shift — no clamping, no distortion.
+
+    This is musically lossless: transposition preserves all intervals, chords,
+    rhythm, and phrasing. The piece sounds identical but in a different key.
+
+    Args:
+        tokens: (N, seq_len) int32 array as returned by tokenize_dataset
+        shifts: semitone offsets to apply, e.g. [-6, -5, ..., -1, 1, ..., 6]
+                defaults to ±6 semitones (12 new copies per sequence)
+        bins:     TIME_SHIFT bin count — must match the value used at tokenization
+        pitches:  pitch count — must match the value used at tokenization
+
+    Returns:
+        (M, seq_len) int32 array: original rows followed by all valid transpositions.
+        M >= N (original is always included).
+    """
+    if shifts is None:
+        shifts = [s for s in range(-6, 7) if s != 0]
+
+    # Derive token index ranges from vocab layout (must match create_vocabulary)
+    # Layout: PAD SOS EOS | TIME_SHIFT×bins | ON×pitches | OFF×pitches | VELOCITY×32
+    ON_START  = 3 + bins                  # first ON token index
+    ON_END    = ON_START + pitches - 1    # last  ON token index
+    OFF_START = ON_END + 1                # first OFF token index
+    OFF_END   = OFF_START + pitches - 1   # last  OFF token index
+
+    augmented = [tokens]
+
+    for shift in shifts:
+        on_mask  = (tokens >= ON_START)  & (tokens <= ON_END)
+        off_mask = (tokens >= OFF_START) & (tokens <= OFF_END)
+
+        # Per-sequence min/max ON token — used to check shift stays in range.
+        # Rows with no ON tokens are excluded (nothing to transpose).
+        has_on  = on_mask.any(axis=1)
+        max_on  = np.where(on_mask, tokens, 0).max(axis=1)
+        min_on  = np.where(on_mask, tokens, ON_END + 1).min(axis=1)
+
+        valid = has_on & (min_on + shift >= ON_START) & (max_on + shift <= ON_END)
+        if not valid.any():
+            continue
+
+        shifted = tokens[valid].copy()
+        shifted[on_mask[valid]]  += shift
+        shifted[off_mask[valid]] += shift
+        augmented.append(shifted)
+
+    result = np.concatenate(augmented, axis=0)
+    print(f"augment_pitch: {len(tokens)} → {len(result)} sequences "
+          f"({len(result) - len(tokens)} added across {len(shifts)} shifts)")
+    return result
 
 
 if __name__ == "__main__":
     from .midi_io import save_vector_to_file
-    arr = tokenize_dataset("maestro-v3.0.0/**/*.midi", seq_length=2048)
-    print(arr.shape)
-    save_vector_to_file(DATA_DIR / "tokenized_dataset_long.npy", arr)
+    arr = tokenize_dataset("data/lakh_piano_files.txt", seq_length=2048)  # ~2,171 sequences
+    arr_aug = augment_pitch(arr)  # default ±6 semitones → ~26k sequences
+    np.save("data/lakh_tokenized_augmented.npy", arr_aug)
