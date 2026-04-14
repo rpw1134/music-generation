@@ -1,4 +1,11 @@
-# Iteration Log
+# Iteration Log — MAESTRO
+
+> **Dataset retired.** After Round 1 and planning for Round 2, we shifted away from MAESTRO v3 to the
+> Lakh Clean dataset. MAESTRO is high-quality but too narrow — solo classical piano only — for the goal
+> of general musical generation. See `lakh_model_iterating.md` for the continuation.
+> This file is kept as a record of the MAESTRO experiments.
+
+---
 
 ## Round 1 — Initial Training Run (10 epochs)
 

@@ -69,7 +69,8 @@ Tokenized dataset saved as `.npy` arrays in `data/`.
 
 ## Planning Docs
 `planning/` contains design notes for future/in-progress work:
-- `model_iterating.md` — **iteration log** (update after every arch/training/inference change)
+- `maestro_model_iterating.md` — iteration log for MAESTRO experiments (retired dataset)
+- `lakh_model_iterating.md` — **active iteration log** for Lakh Clean experiments (update after every arch/training/inference change)
 - `clip_and_cross_attention.md` — vision-to-music conditioning
 - `rope_and_yarn.md` — positional encoding extensions
 - `inference_optimizations.md` — inference perf work
@@ -78,4 +79,4 @@ Tokenized dataset saved as `.npy` arrays in `data/`.
 - `remote_training.md` — Kaggle/remote training setup
 
 ## Iteration Log
-Whenever changes are made to the model architecture, training configuration, tokenization, or inference pipeline — document them in `planning/model_iterating.md`. Include what changed, what problem motivated the change, and what the outcome was (once known).
+Whenever changes are made to the model architecture, training configuration, tokenization, or inference pipeline — document them in `planning/lakh_model_iterating.md`. Include what changed, what problem motivated the change, and what the outcome was (once known).
