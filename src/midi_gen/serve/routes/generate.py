@@ -35,6 +35,8 @@ async def generate(req: GenerateRequest, request: Request):
                 temperature=req.temperature,
                 top_k=req.top_k,
                 top_p=req.top_p,
+                pitch_penalty=req.pitch_penalty,
+                pitch_penalty_window=req.pitch_penalty_window,
                 seed=seed_tensor,
             )
             with open(wav_out, "rb") as f:

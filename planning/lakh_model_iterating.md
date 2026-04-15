@@ -83,7 +83,7 @@ The original unaugmented dataset is always the first block — slice `arr[:2327]
 
 ---
 
-## Round 1 — First Lakh Training Run (in progress)
+## Round 1 — First Lakh Training Run ✓
 
 ### Changes from MAESTRO
 - **Dataset:** MAESTRO v3 → Lakh Clean piano-only, pitch-augmented (`lakh_tokenized_augmented.npy`)
@@ -92,5 +92,52 @@ The original unaugmented dataset is always the first block — slice `arr[:2327]
     7M is a safer fit while still having capacity for musical structure.
 - **seq_length, all other hyperparameters:** unchanged (2048, AdamW lr=3e-4, 25 epochs, warmup 200 steps)
 - **Checkpoint:** `lakh_piano_v1_best.pt`
+- **Hardware:** 2× GPU (DataParallel), 851 steps/epoch
 
-*Update with results once training completes.*
+### Results
+
+| Epoch | Train Loss | Val Loss | Accuracy | Perplexity |
+|---|---|---|---|---|
+| 1  | 20.03 | 3.34 | 0.212 | 28.13 |
+| 5  | 2.72  | 2.62 | 0.323 | 13.80 |
+| 10 | 2.45  | 2.39 | 0.366 | 10.95 |
+| 15 | 2.30  | 2.26 | —     | —     |
+| 20 | 2.25  | 2.21 | 0.400 | 9.15  |
+| 25 | 2.23  | 2.20 | 0.403 | 9.04  |
+
+**vs. MAESTRO Round 1 (epoch 10):** val loss 2.73 → 2.20, perplexity ~15 → ~9. Meaningful improvement.
+
+### Diagnosis
+- **Train loss ≈ val loss throughout** — no overfitting. Clean generalization, model is still underfitting slightly.
+- **Loss still slowly declining at epoch 25** (epochs 20–25: 2.21→2.20, ~0.001/epoch). Nearly plateaued. More epochs would yield diminishing returns.
+- **Perplexity 9** — model chooses between ~9 equally likely tokens at each step. Better than MAESTRO's ~15, but musical coherence still needs work.
+- **With temp=1.1, top_p=0.9:** produces 2048-token samples with relatively few decode errors. Seeding helps.
+
+### Observed output quality
+- Token grammar: good — few ON/OFF errors
+- Pitch distribution: well-centered, no upper-register bias seen in MAESTRO
+- **Issues:**
+  - Lack of rhythmic consistency
+  - Velocity drift — samples become too quiet over time
+  - Gets stuck in repeating patterns
+  - Limited long-range musical structure
+
+---
+
+## Round 2 — Candidates
+
+### Repetition / stuck patterns
+The model loops on short motifs rather than developing phrases. Possible approaches:
+- **Repetition penalty scoped to pitch tokens only** — MAESTRO experiments showed blanket repetition penalty broke token grammar by penalising structural TIME_SHIFT/VELOCITY tokens. A pitch-only penalty (applied only to ON tokens) avoids this. Worth trying at inference time first (no retraining needed).
+- **More data / more diverse data** — only 557 source files. Relaxing the piano-only filter to include near-piano programs or extracting piano tracks from multi-instrument files would increase diversity significantly.
+
+### Velocity drift
+Generated samples trend quieter over time. The model may be learning a bias toward low velocity bins from the Lakh data, or the autoregressive distribution drifts as generation length increases. Investigate:
+- Velocity histogram of generated samples vs. ground truth (add to `stats.py`)
+- If systematic bias: consider velocity-aware sampling or a post-processing normalisation pass
+
+### More training
+Loss was still declining at epoch 25. Diminishing returns expected, but running to 40 epochs costs little on Kaggle and may push perplexity below 8.
+
+### Larger model / more data
+If Round 2 experiments don't resolve musical coherence, the next meaningful step is more data — either relaxing the piano-only filter or expanding to multi-instrument with instrument tokens added to the vocabulary.

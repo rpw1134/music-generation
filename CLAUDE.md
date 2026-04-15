@@ -3,7 +3,7 @@ Small GPT-style transformer trained on MIDI sequences for music generation. The 
 music as a sequence of discrete tokens (ON, OFF, TIME_SHIFT, VELOCITY) and learns
 next-token prediction — identical to a language model.
 
-Served via a FastAPI backend (not yet built) and simple web UI with audio playback and piano roll visualization (not yet built).
+Served via a FastAPI backend and simple web UI with audio playback and piano roll visualization (web UI not yet built).
 
 ## Future Extension
 Vision-to-music: condition the model on CLIP image embeddings via cross-attention to generate
@@ -14,7 +14,7 @@ music matching the "vibe" of an image or slideshow. Build the base music model f
 - **PyTorch** — model and training
 - **pretty_midi** — MIDI parsing and reconstruction
 - **midi2audio** + FluidSynth (system) — MIDI → WAV
-- **FastAPI** — serving (planned)
+- **FastAPI** + **uvicorn** — serving
 
 ## Structure
 ```
@@ -32,8 +32,15 @@ src/midi_gen/
 │   │   ├── data.py           # PyTorch Dataset over tokenized windows
 │   │   └── positional_encodings.py  # RoPE cos/sin table + apply_rope_transformations
 │   └── inference/
-│       ├── base_inference.py # create_sample_tokens: prefill + KV-cache decode loop
-│       └── testing.py
+│       ├── base_inference.py # create_sample_tokens, generate_sample (server-facing, no playback)
+│       ├── stats.py          # compute_generation_stats, GenerationStats dataclass
+│       └── testing.py        # generate_random_sample (local dev script with audio playback)
+├── serve/
+│   ├── api.py                # FastAPI app, lifespan (model load), middleware, router registration
+│   ├── schemas/
+│   │   └── generate.py       # GenerateRequest pydantic schema
+│   └── routes/
+│       └── generate.py       # POST /generate → returns audio/wav
 ├── exploration/
 │   └── midi_test.py
 └── main.py

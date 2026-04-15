@@ -16,6 +16,8 @@ def generate_random_sample(
     temperature: float = 1.0,
     top_k: int = 0,
     top_p: float = 0.0,
+    pitch_penalty: float = 1.0,
+    pitch_penalty_window: int = 64,
     seed = None,
 ):
     # device
@@ -36,7 +38,10 @@ def generate_random_sample(
     model.to(device)
 
     # generate token sequence
-    tokens = create_sample_tokens(model, max_length=max_length, temperature=temperature, top_k=top_k, top_p=top_p, seed=seed)
+    tokens = create_sample_tokens(
+        model, max_length=max_length, temperature=temperature, top_k=top_k, top_p=top_p,
+        pitch_penalty=pitch_penalty, pitch_penalty_window=pitch_penalty_window, seed=seed,
+    )
     token_indices = tokens[0].tolist()
 
     # decode token indices to note events
@@ -56,7 +61,7 @@ def generate_random_sample(
 
 
 if __name__ == "__main__":
-    seed_np = get_seed_tokens(i=5000, j=256)
+    seed_np = get_seed_tokens(i=5800, j=256)
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     seed = torch.tensor(seed_np, dtype=torch.long).unsqueeze(0).to(device)  # (1, 50)
-    generate_random_sample("src/midi_gen/model/models/lakh_piano_v1_best.pt", temperature=1.1, top_p=0.9, max_length=2048, seed=seed)
+    generate_random_sample("src/midi_gen/model/models/lakh_piano_v1_best.pt", temperature=1.1, top_p=0.9, max_length=1024, seed=seed, pitch_penalty=1, pitch_penalty_window=64)
