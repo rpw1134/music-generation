@@ -48,7 +48,7 @@ src/midi_gen/
 - 32 `<VELOCITY_i>` — 32 quantized bins (1-indexed)
 
 ## Model Architecture
-- **GPTMidiV1**: 6-layer decoder-only transformer, `d_model=512`, 8 heads, `ff_dim_ratio=4`, `dropout=0.1`
+- **GPTMidiV1**: 4-layer decoder-only transformer, `d_model=384`, 8 heads, `ff_dim_ratio=4`, `dropout=0.1` (~7M params)
 - **Positional encoding**: RoPE (cos/sin table stored as registered buffer in each TransformerBlock)
 - **Attention**: Flash Attention (`F.scaled_dot_product_attention`), causal mask during training
 - **KV cache**: pre-allocated fixed-size buffers; prefill + single-token decode loop
@@ -63,9 +63,15 @@ src/midi_gen/
 - Trained on Kaggle (GPU)
 
 ## Data
-MAESTRO v3 — https://magenta.tensorflow.org/datasets/maestro
-Uses GeneralUser-GS soundfont for MIDI → audio rendering.
-Tokenized dataset saved as `.npy` arrays in `data/`.
+**Active:** Lakh Clean (piano-only subset) — filtered via `lakh_filter.py` (GM programs 0–7, no drums, ≥50 notes)
+- 557 qualifying files, 33.9 hours, 2,327 base sequences → 30,251 after pitch augmentation
+- Tokenized dataset: `data/lakh_tokenized_augmented.npy`
+- File list: `data/lakh_piano_files.txt`
+
+**Retired:** MAESTRO v3 — solo classical piano, too narrow for general music generation
+
+Uses GeneralUser-GS soundfont for MIDI → audio rendering. All output rendered as Acoustic Grand Piano (program 0).
+Tokenized datasets saved as `.npy` arrays in `data/`.
 
 ## Planning Docs
 `planning/` contains design notes for future/in-progress work:

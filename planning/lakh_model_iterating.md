@@ -25,8 +25,7 @@ token sequences the model cannot learn from.
 tracks are present (`is_drum=False`). This keeps the tokenizer unchanged and avoids instrument
 confusion. A minimum of 50 notes per file is required to exclude near-empty files.
 
-**Outcome:** ~557 files scanned, ~600 qualifying (exact count pending notebook run). This is a smaller
-dataset than MAESTRO in file count but more diverse in style.
+**Outcome:** 557 files scanned, 557 qualifying. Smaller than MAESTRO in file count but more diverse in style.
 
 **Output rendered as grand piano (program 0) regardless of source instrument.** The tokenizer produces
 no instrument tokens, so inference output is always reconstructed as Acoustic Grand Piano. This is
@@ -41,32 +40,57 @@ uv run python -m midi_gen.data_management.lakh_filter --src data/lakh_clean --ou
 
 ---
 
-## Dataset Statistics (pending notebook results)
+## Dataset Statistics
 
-`src/midi_gen/exploration/lakh_piano_stats.ipynb` — scans the file list and computes per-file stats
-(duration, note count, density, pitch distribution, polyphony, time gaps, token estimates).
+`src/midi_gen/exploration/lakh_piano_stats.ipynb` — full results:
 
-Key questions to answer before tokenizing:
-- Total token count and number of 2048-token sequences available for training
-- Whether the existing TIME_SHIFT bin range (0.01s–1.0s, 157 bins) covers the gap distribution
-- Average polyphony — informs whether the model needs to handle denser simultaneous-note patterns than MAESTRO
-- How many files fall below 2048 tokens (less than one full training sequence)
+| Stat | Mean | Median | Min | Max | p95 |
+|---|---|---|---|---|---|
+| Duration (s) | 219.2 | 199.1 | 31.4 | 2290.6 | 394.5 |
+| Note count | 1997 | 1612 | 193 | 18054 | 4202 |
+| Density (notes/s) | 9.1 | 8.4 | 1.6 | 32.4 | 16.4 |
+| Token estimate | 7986 | 6447 | 771 | 72215 | 16805 |
+| Pitch mean | 62.6 | 62.9 | 47.0 | 79.2 | 68.1 |
+| Note dur mean (s) | 0.4 | 0.3 | 0.1 | 3.1 | 0.7 |
+| Gap mean (s) | 0.1 | 0.1 | 0.0 | 0.6 | 0.2 |
+| Gap max (s) | 1.8 | 1.4 | 0.2 | 15.2 | 4.0 |
+| Large gap % (>1s) | 0.6 | 0.1 | 0.0 | 11.7 | 2.6 |
+| Poly mean | 3.6 | 3.2 | 1.0 | 16.6 | 5.5 |
+| Poly max | 8 | 8 | 2 | 29 | 13 |
 
-*Update this section once the notebook has run.*
+**Dataset totals:** 33.9 hours, ~4.45M tokens, **2,327 sequences @ seq_length=2048**
+
+### Key findings
+- **TIME_SHIFT bins are fine** — mean gap 0.1s, large gaps (>1s) only 0.6% on average; existing 0.01s–1.0s log-scale bins cover the distribution well
+- **Pitch is well-centered** — mean ~62.6 (near middle C), no upper-register bias seen in MAESTRO
+- **2,327 sequences is too small to train on directly** — addressed with pitch transposition augmentation
 
 ---
 
-## Round 1 — First Lakh Training Run (planned)
+## Pitch Transposition Augmentation
 
-### Changes from MAESTRO Round 2 plan
-- Dataset: MAESTRO v3 → Lakh Clean piano-only
-- Tokenization: re-run `tokenize_dataset` over the new file list → `data/lakh_tokenized_dataset.npy`
-- Architecture, training hyperparameters, and seq_length (2048) carry over unchanged pending stats review
+2,327 sequences is too small (~62M tokens) for a 20M parameter model. Pitch transposition is
+musically lossless — shifting all notes by N semitones preserves every interval, chord, rhythm, and
+phrase. The piece sounds identical in a different key.
 
-### Open questions before training
-- Does the token estimate per file suggest the dataset produces enough sequences to train on, or do we
-  need to lower the minimum-notes threshold or reconsider seq_length?
-- Are there tokenizer parameters (TIME_SHIFT bins, velocity bins) that should be adjusted given the
-  different musical style of the Lakh files vs. MAESTRO?
+**Implementation:** `augment_pitch()` in `tokenizing.py`. Operates on the already-tokenized `(N, seq_len)`
+array. For each shift, sequences where any note would fall outside MIDI pitch range [1, 128] are
+skipped (no clamping). Default: ±6 semitones (12 shifts).
+
+**Result:** 2,327 → 30,251 sequences (13x increase). Saved to `data/lakh_tokenized_augmented.npy`.
+
+The original unaugmented dataset is always the first block — slice `arr[:2327]` to recover it.
+
+---
+
+## Round 1 — First Lakh Training Run (in progress)
+
+### Changes from MAESTRO
+- **Dataset:** MAESTRO v3 → Lakh Clean piano-only, pitch-augmented (`lakh_tokenized_augmented.npy`)
+- **Model size reduced:** 6L/d=512/8h (~20M params) → 4L/d=384/8h (~7M params)
+  - Motivation: 62M unique tokens is too small for 20M params (Chinchilla: ~3M optimal).
+    7M is a safer fit while still having capacity for musical structure.
+- **seq_length, all other hyperparameters:** unchanged (2048, AdamW lr=3e-4, 25 epochs, warmup 200 steps)
+- **Checkpoint:** `lakh_piano_v1_best.pt`
 
 *Update with results once training completes.*
