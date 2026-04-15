@@ -1,20 +1,17 @@
-import base64
-import dataclasses
 import os
 import tempfile
-import time
 
 import torch
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
 
 from midi_gen.model.inference.base_inference import generate_sample
-from midi_gen.model.inference.stats import compute_generation_stats
-from midi_gen.serve.schemas.generate import GenerateRequest, GenerateResponse
+from midi_gen.serve.schemas.generate import GenerateRequest
 
 router = APIRouter()
 
 
-@router.post("/generate", response_model=GenerateResponse)
+@router.post("/generate")
 async def generate(req: GenerateRequest, request: Request):
     model  = request.app.state.model
     device = request.app.state.device
@@ -26,12 +23,11 @@ async def generate(req: GenerateRequest, request: Request):
     if req.seed:
         seed_tensor = torch.tensor([req.seed], dtype=torch.long, device=device)
 
-    t_start = time.perf_counter()
     try:
         with tempfile.TemporaryDirectory() as tmp:
             midi_out = os.path.join(tmp, "generated.midi")
             wav_out  = os.path.join(tmp, "generated.wav")
-            token_indices, notes, decode_errors = generate_sample(
+            generate_sample(
                 model=model,
                 midi_out=midi_out,
                 wav_out=wav_out,
@@ -42,11 +38,8 @@ async def generate(req: GenerateRequest, request: Request):
                 seed=seed_tensor,
             )
             with open(wav_out, "rb") as f:
-                wav_b64 = base64.b64encode(f.read()).decode("utf-8")
+                wav_bytes = f.read()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    elapsed = time.perf_counter() - t_start
-    stats = compute_generation_stats(token_indices, notes, elapsed, decode_errors)
-
-    return GenerateResponse(wav_b64=wav_b64, stats=dataclasses.asdict(stats))
+    return Response(content=wav_bytes, media_type="audio/wav")

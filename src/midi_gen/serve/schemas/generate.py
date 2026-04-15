@@ -9,6 +9,3 @@ class GenerateRequest(BaseModel):
     max_length: int        = Field(default=1024, ge=1,   le=4096)
 
 
-class GenerateResponse(BaseModel):
-    wav_b64: str
-    stats: dict

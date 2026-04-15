@@ -56,7 +56,7 @@ def generate_random_sample(
 
 
 if __name__ == "__main__":
-    seed_np = get_seed_tokens(i=4000, j=256)
+    seed_np = get_seed_tokens(i=5000, j=256)
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     seed = torch.tensor(seed_np, dtype=torch.long).unsqueeze(0).to(device)  # (1, 50)
     generate_random_sample("src/midi_gen/model/models/lakh_piano_v1_best.pt", temperature=1.1, top_p=0.9, max_length=2048, seed=seed)
