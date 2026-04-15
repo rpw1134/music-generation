@@ -9,7 +9,7 @@ wheels/
 # Virtual environments
 .venv
 
-.env
+src/midi_gen/serve/.env
 
 *.wav
 

@@ -24,7 +24,7 @@ def parse_tokens_to_midi(tokens, output_path: str):
     write_midi(notes, output_path)
     return notes, errors
 
-def get_seed_tokens(i: int, j: int, dataset_path: str = "data/tokenized_dataset.npy") -> np.ndarray:
+def get_seed_tokens(i: int, j: int, dataset_path: str = "data/lakh_tokenized_augmented.npy") -> np.ndarray:
     """Return the first j tokens from dataset row i as a seed.
 
     Args:

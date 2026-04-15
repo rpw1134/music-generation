@@ -27,9 +27,11 @@ def generate_random_sample(
     # DataParallel saves weights with a "module." prefix — strip it for single-device inference
     if any(k.startswith("module.") for k in state_dict):
         state_dict = {k.removeprefix("module."): v for k, v in state_dict.items()}
-    # infer max_seq_len from the saved RoPE buffer so the model is always built correctly
+    # infer architecture from checkpoint so this works with any saved model
     max_seq_len = state_dict["transformer_blocks.0.rope_cos"].shape[2]
-    model = GPTMidiV1(max_seq_len=max_seq_len)
+    d_model     = state_dict["embedding.weight"].shape[1]
+    num_layers  = len({k.split(".")[1] for k in state_dict if k.startswith("transformer_blocks.")})
+    model = GPTMidiV1(max_seq_len=max_seq_len, d_model=d_model, num_layers=num_layers)
     model.load_state_dict(state_dict, strict=False)
     model.to(device)
 
@@ -54,7 +56,7 @@ def generate_random_sample(
 
 
 if __name__ == "__main__":
-    seed_np = get_seed_tokens(i=0, j=128)
+    seed_np = get_seed_tokens(i=4000, j=256)
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     seed = torch.tensor(seed_np, dtype=torch.long).unsqueeze(0).to(device)  # (1, 50)
-    generate_random_sample("src/midi_gen/model/models/midiv1_best_2.pt", temperature=1.1, top_p=0.9, max_length=2048)
+    generate_random_sample("src/midi_gen/model/models/lakh_piano_v1_best.pt", temperature=1.1, top_p=0.9, max_length=2048, seed=seed)

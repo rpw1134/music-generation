@@ -1,5 +1,6 @@
 import torch
 from torch.nn import functional as F
+from pathlib import Path
 
 
 def _sample_next_token(logits: torch.Tensor, temperature: float, top_k: int = 0, top_p: float = 0.0) -> torch.Tensor:
@@ -83,3 +84,49 @@ def create_sample_tokens(model, max_length: int, seed: torch.Tensor | None = Non
             tokens = torch.cat([tokens, next_token.view(1, 1)], dim=1)
 
     return tokens
+
+
+def generate_sample(
+    model,
+    midi_out: str,
+    wav_out: str,
+    max_length: int = 1024,
+    temperature: float = 1.0,
+    top_k: int = 0,
+    top_p: float = 0.0,
+    seed: torch.Tensor | None = None,
+) -> tuple[list[int], list[tuple], int]:
+    """Generate a music sample from a pre-loaded model.
+
+    Args:
+        model:       GPTMidiV1, already on the correct device and in eval mode.
+        midi_out:    path to write the generated MIDI file.
+        wav_out:     path to write the rendered WAV file.
+        max_length:  maximum number of tokens to generate.
+        temperature: sampling temperature.
+        top_k:       top-k cutoff (0 = disabled).
+        top_p:       nucleus sampling threshold (0.0 = disabled).
+        seed:        optional (1, seq_len) long tensor to condition on.
+
+    Returns:
+        token_indices:  list of raw token index integers.
+        notes:          list of (start, end, pitch, velocity_bin) tuples.
+        decode_errors:  count of malformed token sequences encountered.
+    """
+    from midi_gen.data_management.tokenizing import create_vocabulary, reconstruct_notes
+    from midi_gen.data_management.midi_io import write_midi, midi_to_wav
+
+    tokens = create_sample_tokens(
+        model, max_length=max_length, seed=seed,
+        temperature=temperature, top_k=top_k, top_p=top_p,
+    )
+    token_indices = tokens[0].tolist()
+
+    _, inverse = create_vocabulary()
+    token_strings = [inverse[t] for t in token_indices]
+    notes, errors = reconstruct_notes(token_strings)
+
+    write_midi(notes, midi_out)
+    midi_to_wav(midi_out, wav_out)
+
+    return token_indices, notes, len(errors)
