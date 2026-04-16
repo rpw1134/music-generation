@@ -19,6 +19,7 @@ Typical usage
     # ["<TIME_SIG_4_4>", "<DENSITY_4>", "<PITCH_LOW_3>", "<PITCH_HIGH_5>", "<VEL_MEAN_6>", "<POLY_1>"]
 """
 
+import glob as _glob
 import numpy as np
 import pretty_midi
 from pathlib import Path
@@ -38,11 +39,11 @@ KNOWN_TIME_SIGS = ["4_4", "3_4", "6_8", "2_4", "2_2"]
 # Replace with output of fit_boundaries() computed over the full ADL corpus.
 # Each array has (n_bins - 1) split points; np.searchsorted maps a value to bin 0..n_bins-1.
 DEFAULT_BOUNDARIES: dict[str, np.ndarray] = {
-    "density":    np.array([ 2.0,  4.0,  6.0,  8.0, 10.0, 14.0, 20.0]),  # notes/sec, 8 bins
-    "pitch_low":  np.array([36.0, 42.0, 48.0, 52.0, 56.0, 60.0, 64.0]),  # MIDI pitch, 8 bins
-    "pitch_high": np.array([52.0, 57.0, 62.0, 66.0, 70.0, 74.0, 79.0]),  # MIDI pitch, 8 bins
-    "vel_mean":   np.array([30.0, 45.0, 55.0, 65.0, 75.0, 85.0, 95.0]),  # 0–127, 8 bins
-    "poly":       np.array([ 1.5,  2.5,  3.5]),                           # mean polyphony, 4 bins
+    "density":    np.array([2.2, 3.3, 4.2, 5.3, 6.6, 8.5, 11.9]),
+    "pitch_low":    np.array([36.0, 41.0, 44.0, 48.0, 52.0, 55.0, 60.0]),
+    "pitch_high":    np.array([64.0, 66.0, 69.0, 71.0, 74.0, 77.0, 82.0]),
+    "vel_mean":    np.array([58.7, 70.0, 78.7, 86.5, 95.0, 100.0, 114.0]),
+    "poly":    np.array([2.3, 3.0, 4.0]),
 }
 
 
@@ -307,7 +308,7 @@ def bar_features_to_tokens(
 # ---------------------------------------------------------------------------
 
 def fit_boundaries(
-    file_list: list[str | Path],
+    source: str | list[str | Path],
     n_bins: int = 8,
     n_poly_bins: int = 4,
 ) -> dict[str, np.ndarray]:
@@ -317,13 +318,21 @@ def fit_boundaries(
     distribution. Run this once on the full ADL corpus to replace DEFAULT_BOUNDARIES.
 
     Args:
-        file_list:   Paths to MIDI files to survey.
+        source:      Either a glob pattern string (e.g. "data/adl_clean/**/*.mid")
+                     or an explicit list of file paths.
         n_bins:      Number of bins for density, pitch, and velocity features.
         n_poly_bins: Number of bins for polyphony.
 
     Returns:
         Dict matching the shape of DEFAULT_BOUNDARIES, with empirical split points.
+        Prints the result as copy-pasteable Python so you can hardcode it.
     """
+    if isinstance(source, str):
+        file_list = _glob.glob(source, recursive=True)
+        print(f"fit_boundaries: found {len(file_list)} files matching '{source}'")
+    else:
+        file_list = list(source)
+
     densities, pitch_lows, pitch_highs, vel_means, poly_means = [], [], [], [], []
     errors = 0
 
@@ -349,13 +358,22 @@ def fit_boundaries(
         percentiles = np.linspace(0, 100, n + 1)[1:-1]  # exclude 0th and 100th
         return np.percentile(values, percentiles)
 
-    return {
+    boundaries = {
         "density":    _edges(densities,   n_bins),
         "pitch_low":  _edges(pitch_lows,  n_bins),
         "pitch_high": _edges(pitch_highs, n_bins),
         "vel_mean":   _edges(vel_means,   n_bins),
         "poly":       _edges(poly_means,  n_poly_bins),
     }
+
+    print("\n# --- paste into DEFAULT_BOUNDARIES in expert_descriptions.py ---")
+    print("DEFAULT_BOUNDARIES: dict[str, np.ndarray] = {")
+    for key, arr in boundaries.items():
+        vals = ", ".join(f"{v:.1f}" for v in arr)
+        print(f'    "{key}":    np.array([{vals}]),')
+    print("}")
+
+    return boundaries
 
 
 # ---------------------------------------------------------------------------
