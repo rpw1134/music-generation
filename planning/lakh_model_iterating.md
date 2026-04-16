@@ -389,281 +389,284 @@ explicit (as `tokenizing.py` does) so index ranges can be read off at a glance.
 
 ---
 
-## Round 2 — Revised Plan (supersedes "Implementation Order" above)
-
-After further design review, Round 2 is expanding in scope. The original plan (Option A:
-prefix tokens in self-attention) is being skipped in favour of going directly to the full
-FIGARO-inspired architecture. The revised plan has three concrete phases:
-
-1. Extend the expert description vocabulary (BAR position tokens + chord tokens)
-2. Write the REMI+ tokenizer
-3. New encoder-decoder architecture with cross-attention conditioning
-
-Each phase is documented below. **Implement in this order — each phase depends on the previous.**
+## Round 2 — Revised Plan (supersedes all sections above from "Implementation Order" onward)
 
 ---
 
-### Phase 1 — Extended Expert Description Vocabulary
+### Architecture — Encoder-Decoder with Cross-Attention
 
-The existing description tokens (DENSITY, PITCH_LOW, PITCH_HIGH, VEL_MEAN, POLY, TIME_SIG)
-are kept. Two new token groups are added.
-
-#### 1a. BAR_i — Bar position within the training window
-
-**What it is:** A token indicating which bar-within-the-window this is. Gives the model a
-sense of local position in musical time (bar 0 of this sequence, bar 3, bar 11, etc.).
-
-**Why not absolute bar position in the piece:** Pieces vary wildly in length. The model would
-see high bar numbers rarely, and absolute position would not generalise across pieces of
-different lengths. Window-relative position (always starting at 0) is consistent across all
-training examples.
-
-**How to determine the range:** At seq_length=2048, how many bars fit in one window depends
-on tempo and note density. A typical bar at 120 BPM in 4/4 generates roughly 40–80 REMI+
-tokens (depending on note density). That gives ~25–50 bars per window in the median case.
-Survey the ADL corpus to find the 99th-percentile bars-per-window count — that becomes
-MAX_BARS_PER_WINDOW. All sequences will have at most that many BAR_i tokens.
-
-**Token names:** `<BAR_0>`, `<BAR_1>`, ..., `<BAR_{MAX_BARS_PER_WINDOW - 1}>`
-
-**Where it appears in the sequence:** As the first token in each bar's description header,
-before TIME_SIG and the other feature tokens:
-```
-<BAR_3> <TIME_SIG_4_4> <DENSITY_4> <PITCH_LOW_3> <PITCH_HIGH_5> <VEL_MEAN_6> <POLY_2> <CHORD_G_MAJ>
-<POSITION_0> <VELOCITY_12> <ON_60> ...
-```
-
-**Survey function needed:** `survey_bars_per_window(file_list, seq_length=2048) -> int`
-in `expert_descriptions.py`. Tokenises a sample of ADL files with the REMI+ tokenizer,
-counts how many bars each window contains, returns the 99th-percentile value.
-
-#### 1b. CHORD tokens — Chord quality per bar
-
-**What it is:** A token describing the dominant chord in each bar. Gives the model harmonic
-context — the description tells it "this bar is over a G major chord" before it generates
-the notes.
-
-**Chord representation:** Root (pitch class) + quality. Not Roman numeral / key-relative,
-because key detection from MIDI is error-prone and adds a hard dependency. Absolute pitch
-class is robust.
-
-- **Root:** C, C#, D, D#, E, F, F#, G, G#, A, A#, B — 12 values
-- **Quality:** MAJ, MIN, DOM7, DIM, AUG, OTHER — 6 values
-- **Special:** `<CHORD_NONE>` for empty bars
-
-Total: 12 × 6 + 1 = **73 chord tokens**
-
-**Detection method:** Template matching against the bar's pitch-class histogram.
-For each candidate (root, quality) pair, compute a dot product of the pitch-class
-histogram against the chord template (interval set). Pick the highest-scoring pair.
-This is fast, requires no external library, and degrades gracefully to OTHER for
-ambiguous bars. Implementation goes in `expert_descriptions.py`.
-
-**Chord templates (intervals from root, as pitch-class sets):**
-
-| Quality | Intervals |
-|---------|-----------|
-| MAJ     | {0, 4, 7} |
-| MIN     | {0, 3, 7} |
-| DOM7    | {0, 4, 7, 10} |
-| DIM     | {0, 3, 6} |
-| AUG     | {0, 4, 8} |
-
-If the best-scoring template scores below a confidence threshold (empirically tuned on ADL),
-the chord is labelled OTHER.
-
-**Survey function needed:** Run chord detection across the ADL corpus and print the
-distribution of chord types. This validates that the 5 qualities + OTHER cover the
-distribution well, and that `<CHORD_NONE>` (empty bars) is rare enough to ignore.
-
-#### 1c. Updated vocab layout
+This is not a flat decoder-only transformer. It has two separate components that process
+two separate inputs. Here is the high-level picture:
 
 ```
-Index range    Group                    Count
-──────────────────────────────────────────────
-0              <PAD>                    1
-1              <SOS>                    1
-2              <EOS>                    1
-3              <BAR>                    1     ← structural separator (unchanged)
-4–9            <TIME_SIG_*>             6     ← 5 known + OTHER
-10–25          <POSITION_0–15>          16
-26–182         <TIME_SHIFT_0–156>       157
-183–310        <ON_1–128>               128
-311–438        <OFF_1–128>              128
-439–470        <VELOCITY_1–32>          32
-471–478        <DENSITY_0–7>            8     ┐
-479–486        <PITCH_LOW_0–7>          8     │
-487–494        <PITCH_HIGH_0–7>         8     │ description
-495–502        <VEL_MEAN_0–7>           8     │ tokens
-503–506        <POLY_0–3>               4     │
-507–579        <CHORD_*>                73    │ (12 roots × 6 qualities + NONE)
-580–6xx        <BAR_0–MAX>              ~32   ┘ (exact count from survey)
-──────────────────────────────────────────────
-Total                                   ~613 (exact count after surveys)
+  ENCODER INPUT                          DECODER INPUT / OUTPUT
+  (description tokens, per bar)          (note tokens, autoregressive)
+
+  <TIME_SIG_4_4>                         <BAR>
+  <DENSITY_4>          ──► Bidirectional  <POSITION_0>
+  <PITCH_LOW_3>            Encoder    ──► <VELOCITY_12>  ◄── cross-attention
+  <PITCH_HIGH_5>           (no causal     <ON_60>             at every layer
+  <VEL_MEAN_6>              mask)         <ON_64>
+  <POLY_2>                               <POSITION_4>
+  <CHORD_C_MAJ>                          <OFF_60>
+                                         ...
+                                         next <BAR> → re-encode next bar's description
 ```
 
-Exact offsets are written explicitly in `tokenizing_remi.py` so they can be read off at
-a glance, following the same convention as `tokenizing.py`.
+The encoder and decoder are completely separate. Description tokens never appear in the
+decoder's input. Note tokens never appear in the encoder's input. The only connection
+between them is the cross-attention mechanism inside each decoder layer.
 
 ---
 
-### Phase 2 — REMI+ Tokenizer (`tokenizing_remi.py`)
+### The Encoder
 
-A new file, leaving `tokenizing.py` untouched for reference.
+The encoder is a small bidirectional transformer. "Bidirectional" means it has no causal
+mask — every description token can attend to every other description token in both directions.
+This is appropriate because the description for a bar is a fixed, complete set of facts
+(density, pitch range, chord, etc.) that are all known at the same time. There is no
+sequential dependency between them that would require causal ordering.
 
-#### Token sequence structure (one bar)
+- Input: the 7 description tokens for one bar (TIME_SIG, DENSITY, PITCH_LOW, PITCH_HIGH,
+  VEL_MEAN, POLY, CHORD)
+- Architecture: 2 transformer layers, `d_model=384`, 8 heads — same dimensions as the decoder
+- Output: 7 hidden state vectors of size `d_model`, one per input token. These are the
+  "encoded description" that the decoder will cross-attend to.
 
-```
-<BAR>
-<BAR_i> <TIME_SIG_4_4> <DENSITY_4> <PITCH_LOW_3> <PITCH_HIGH_5> <VEL_MEAN_6> <POLY_2> <CHORD_G_MAJ>
-<POSITION_0> <VELOCITY_12> <ON_60> <ON_64> <ON_67>
-<POSITION_4> <VELOCITY_10> <OFF_60> <VELOCITY_14> <ON_62>
-<POSITION_8> <OFF_64> <OFF_67>
-...
-```
-
-The `<BAR>` structural token is the separator the decoder learns to generate. The description
-header (`<BAR_i>` through `<CHORD_*>`) is consumed by the encoder (Phase 3) and never
-generated by the decoder during inference. During training, both appear in the sequence and
-the loss is masked to zero on description tokens — the model is only trained to predict
-note tokens and the structural `<BAR>` token.
-
-#### OFF token placement
-
-OFF tokens are placed at their actual note-off time (the position in the bar where the note
-ends), not grouped with the note-on. This keeps the sequence causal and requires no
-lookahead. A note that starts in bar 3 and ends in bar 4 emits its OFF token at the
-appropriate POSITION within bar 4.
-
-#### Functions to implement
-
-| Function | Purpose |
-|---|---|
-| `build_vocab_remi()` | Returns `(vocab: dict, inverse: list)` for the full ~613-token vocabulary |
-| `tokenize_file_remi(path, vocab, boundaries) -> list[int]` | Single file → flat token list |
-| `tokenize_dataset_remi(file_list, vocab, boundaries, seq_length) -> np.ndarray` | Corpus → (N, seq_length) array |
-| `reconstruct_notes_remi(tokens, inverse) -> list[tuple]` | Token list → (start, end, pitch, velocity) tuples |
-
-#### Loss masking
-
-During training the loss is computed only on non-description tokens. Description tokens are
-inputs (consumed as context) not targets (things the model learns to generate). A boolean
-mask is constructed from the token indices: any index in the description range is masked out
-before the cross-entropy loss is summed. This is handled in `training_loop.py` — the
-tokenizer exports `DESCRIPTION_TOKEN_RANGE = (start_idx, end_idx)` so the training loop can
-build the mask without hardcoding offsets.
+The encoder is run **once per bar**, before the decoder starts generating that bar's notes.
+Its output is fixed and does not change while the decoder generates.
 
 ---
 
-### Phase 3 — Encoder-Decoder Architecture
+### The Decoder
 
-#### Overview
+The decoder is a causal transformer — identical in structure to GPTMidiV1, but with one
+extra sub-layer added to each transformer block: cross-attention to the encoder's output.
 
-The existing `GPTMidiV1` decoder-only architecture is extended with a small bidirectional
-encoder that processes each bar's description header. The decoder generates note tokens
-using cross-attention to the encoder's output.
+Each decoder layer now has three sub-layers instead of two:
 
 ```
-Description tokens (per bar)          Note tokens (autoregressive)
-  <BAR_i> <TIME_SIG> <DENSITY>  →  Bidirectional    →  cross-attn  →  Decoder  →  logits
-  <PITCH_LOW> ... <CHORD_G_MAJ>     Encoder                            (causal)
+  (before)                      (after)
+  ─────────────────────         ──────────────────────────────────────
+  LayerNorm                     LayerNorm
+  Self-Attention (causal)       Self-Attention (causal)
+  + residual                    + residual
+                                LayerNorm
+  LayerNorm                     Cross-Attention → encoder hidden states
+  FFN                           + residual
+  + residual
+                                LayerNorm
+                                FFN
+                                + residual
 ```
 
-#### Bidirectional Encoder
+The self-attention sub-layer is causal — note token at position i can only attend to
+positions 0 through i. This is required for autoregressive generation (you can't look ahead).
 
-- Processes the description tokens for **one bar at a time** using full (non-causal)
-  self-attention. No causal mask — it can attend to all description tokens in both directions.
-- Small: 2 transformer layers, same `d_model=384` and `num_heads=8` as the decoder.
-  The description sequence is short (7–8 tokens per bar), so depth beyond 2 layers adds
-  little and increases training cost.
-- Output: a sequence of `d_model`-dimensional vectors, one per description token. The decoder
-  cross-attends to this sequence.
-- The encoder is run **once per bar** before generating that bar's notes. Its output is fixed
-  for the duration of that bar's generation — encoder states do not change while the decoder
-  is producing notes for bar N.
+The cross-attention sub-layer has no causal restriction — every note token can attend to
+all 7 encoder hidden states freely. The encoder hidden states are the keys and values;
+the decoder hidden state at the current position is the query. This is how the decoder
+reads the description: it asks "given what I'm generating right now, what parts of this
+bar's description are relevant?"
 
-#### Decoder
+---
 
-- Same causal self-attention as `GPTMidiV1`, N layers (starting point: 4 layers, same as
-  Round 1; tune after first training run).
-- Each decoder layer gains a **cross-attention sub-layer** inserted between self-attention
-  and the FFN, following the standard encoder-decoder layout:
-  ```
-  LayerNorm → Self-Attention (causal) → residual
-  LayerNorm → Cross-Attention (to encoder states) → residual
-  LayerNorm → FFN → residual
-  ```
-- Cross-attention keys and values come from the current bar's encoder output. Queries come
-  from the decoder hidden states. This is identical to the T5 / BART decoder block.
+### Why not just put description tokens in the decoder sequence?
 
-#### KV-Cache Strategy
+If description tokens were in the decoder's input sequence (the flat approach), the causal
+mask would still work — note tokens come after description tokens, so they can attend back
+to them. But there are two problems:
 
-Two separate caches:
+1. **The description tokens themselves would need to be predicted.** At every position the
+   model produces a distribution over the full vocabulary. If description tokens are in the
+   sequence, the model is being asked to predict them as well as note tokens, which wastes
+   capacity and pollutes the loss signal (even if you mask them out, they still occupy
+   attention bandwidth as the sequence grows longer).
 
-1. **Self-attention KV-cache** (existing): grows token-by-token as the decoder generates
-   note tokens. Same pre-allocated buffer as before.
-2. **Encoder state cache** (new): stores the encoder output for the current bar. Because
-   the encoder output is fixed for the entire bar, this is computed once at the `<BAR>` token
-   and reused for every note token in that bar. When the decoder emits the next `<BAR>` token,
-   the encoder is re-run on the next bar's description and the cache is refreshed.
+2. **The description tokens get processed causally, which is wrong.** In a flat sequence,
+   when the model reads `<DENSITY_4>` it has not yet seen `<CHORD_C_MAJ>` (which comes
+   later in the description). A causal mask prevents later description tokens from informing
+   earlier ones. The encoder has no such restriction — all 7 description tokens see each
+   other fully, producing a richer representation of the bar's character.
 
-This means inference has two phases per bar:
-1. **Encode**: run the bidirectional encoder on the description tokens → store encoder states.
-2. **Decode**: run the causal decoder token-by-token, cross-attending to the stored states.
+The cross-attention design cleanly separates these two concerns: the encoder reads the full
+description with full attention, and the decoder generates notes with access to that full
+representation at every step.
 
-#### New files / changes
+---
 
-| File | Change |
-|---|---|
-| `model/models/TransformerBlock.py` | Add optional `CrossAttentionBlock` after self-attention. Controlled by `use_cross_attention=True` flag. No change to existing self-attention path. |
-| `model/models/DescriptionEncoder.py` | New file. Small 2-layer bidirectional transformer. Takes a description token sequence, returns encoder hidden states `(seq_len, d_model)`. |
-| `model/models/GPTMidiV2.py` | New file. Wraps `DescriptionEncoder` + N decoder `TransformerBlock`s with cross-attention. Handles the encode-once-per-bar logic during inference. |
-| `model/training/training_loop.py` | Add description loss mask. Pass encoder states to decoder during forward pass. |
-| `model/inference/base_inference.py` | Two-phase inference: encode description, then decode notes bar by bar. |
-| `serve/schemas/generate.py` | Add optional `descriptions` field (list of per-bar feature dicts or pre-encoded tokens). |
+### Training: what gets stored and how the forward pass works
 
-#### Training forward pass (pseudocode)
+**Dataset format**
+
+The tokenizer produces two parallel arrays per training window, not one flat array:
+
+```
+note_tokens:  (N, seq_len)          — decoder input/output
+              BAR, POSITION_*, VELOCITY_*, ON_*, OFF_* tokens only
+              padded to seq_len=2048, sliced at BAR boundaries
+
+desc_tokens:  (N, max_bars, 7)      — encoder input
+              one row of 7 description tokens per bar in the window
+              max_bars = maximum bars that fit in seq_len (empirically determined)
+
+bar_map:      (N, seq_len)          — integer array
+              bar_map[i, t] = which bar index the note token at position t belongs to
+              used to route cross-attention: token at position t attends to
+              encoder_states[bar_map[i, t]]
+```
+
+These three arrays are saved together and loaded as a unit by the dataset class.
+
+**Forward pass**
 
 ```python
-# x shape: (batch, seq_len) — full REMI+ token sequence including description tokens
-# description_mask: (batch, seq_len) bool — True where token is a description token
+# desc_tokens: (batch, max_bars, 7)
+# note_tokens: (batch, seq_len)
+# bar_map:     (batch, seq_len)
 
-for each bar b in sequence:
-    desc_tokens = extract_description_tokens(x, b)          # (batch, 7)
-    encoder_states[b] = encoder(desc_tokens)                # (batch, 7, d_model)
+# Step 1 — encode all bars in the batch at once
+# reshape to (batch * max_bars, 7), encode, reshape back
+encoder_states = encoder(desc_tokens)          # (batch, max_bars, 7, d_model)
 
-# Decoder forward — cross-attends to encoder_states[current_bar] at each position
-logits = decoder(x, encoder_states)                         # (batch, seq_len, vocab)
+# Step 2 — for each decoder position, gather the right encoder states
+# bar_map tells us which bar index to use at each position
+# result: (batch, seq_len, 7, d_model) — each token gets its bar's encoder states
+per_position_states = encoder_states[bar_map]  # indexed by bar_map
 
-# Mask loss on description tokens — we only train the model to predict note tokens
-loss = cross_entropy(logits, targets, mask=~description_mask)
+# Step 3 — decoder forward, cross-attending at each layer to per_position_states
+logits = decoder(note_tokens, per_position_states)   # (batch, seq_len, decoder_vocab_size)
+
+# Step 4 — loss on note tokens only (BAR counts as a note token here)
+loss = cross_entropy(logits, targets)
 ```
 
-#### Why skip Option A
-
-Option A (prefix tokens in plain self-attention) was originally the starting point. It is
-simpler but has a structural problem: the causal mask prevents note tokens from attending
-back to description tokens that appear earlier in the same bar once the sequence has grown
-long. In a 2048-token window this is usually fine, but for longer sequences (or when
-description tokens are far in the past) the conditioning signal can degrade. The encoder-
-decoder design avoids this entirely — encoder states are always immediately accessible via
-cross-attention regardless of sequence position.
+There is no loss mask needed because description tokens are never in the decoder's input
+or output — they only exist in `desc_tokens` which goes to the encoder.
 
 ---
 
-### Revised Implementation Order
+### Separate vocabularies
+
+Because the encoder and decoder process different token types, they have separate
+vocabularies and separate embedding tables.
+
+**Encoder vocabulary** (~42 tokens):
+```
+TIME_SIG_4_4, TIME_SIG_3_4, TIME_SIG_6_8, TIME_SIG_2_4, TIME_SIG_2_2, TIME_SIG_OTHER  (6)
+DENSITY_0 … DENSITY_7          (8)
+PITCH_LOW_0 … PITCH_LOW_7      (8)
+PITCH_HIGH_0 … PITCH_HIGH_7    (8)
+VEL_MEAN_0 … VEL_MEAN_7        (8)
+POLY_0 … POLY_3                (4)
+CHORD_*                        (62: 12 roots × 5 qualities + OTHER + NONE)
+─────────────────────────────────
+Total: ~104 tokens
+```
+
+**Decoder vocabulary** (~468 tokens):
+```
+PAD, SOS, EOS                  (3)
+BAR                            (1)
+POSITION_0 … POSITION_15       (16)
+ON_1 … ON_128                  (128)
+OFF_1 … OFF_128                (128)
+VELOCITY_1 … VELOCITY_32       (32)
+─────────────────────────────────
+Total: 308 tokens
+```
+
+TIME_SHIFT tokens from the old tokenizer are not included — REMI+ replaces absolute time
+shifts with BAR + POSITION. The old tokenizer and vocabulary are kept in `tokenizing.py`
+untouched for reference.
+
+The encoder has its own `nn.Embedding(104, d_model)`. The decoder has its own
+`nn.Embedding(308, d_model)` with weight-tied output projection as before.
+
+---
+
+### Inference
+
+At inference you provide a list of bar descriptions — one per bar you want to generate.
+Each description is the 7-token sequence: TIME_SIG, DENSITY, PITCH_LOW, PITCH_HIGH,
+VEL_MEAN, POLY, CHORD. These come from a seed MIDI (extract features from an existing
+piece) or are specified manually.
+
+The generation loop:
+
+```
+generated = [<SOS>, <BAR>]
+for each bar b in the target description list:
+    encoder_states_b = encoder(desc_tokens[b])    # (7, d_model) — run once
+    while True:
+        next_token = decoder.sample(generated, encoder_states_b)
+        if next_token == <BAR> or next_token == <EOS>:
+            generated.append(next_token)
+            break
+        generated.append(next_token)
+
+notes = reconstruct_notes_remi(generated)
+```
+
+The decoder generates one token at a time, using its KV-cache for the self-attention
+(same as before). The encoder states for the current bar are fixed and passed to every
+cross-attention call. When the decoder emits `<BAR>`, the loop encodes the next bar's
+description and continues.
+
+---
+
+### Chord tokens
+
+A chord is multiple notes played at the same time. In western music, chords are described
+by two things:
+
+- **Root** — the "home" note, one of the 12 pitch classes: C, C#, D, D#, E, F, F#, G, G#, A, A#, B
+- **Quality** — the pattern of intervals above the root:
+  - **Major** — bright. Root + 4 semitones + 7 semitones (e.g. C E G)
+  - **Minor** — dark. Root + 3 semitones + 7 semitones (e.g. C Eb G)
+  - **Dominant 7th** — tense, wants to resolve. Root + 4 + 7 + 10 semitones (e.g. C E G Bb)
+  - **Diminished** — very tense. Root + 3 + 6 semitones (e.g. C Eb Gb)
+  - **Augmented** — unstable, strange. Root + 4 + 8 semitones (e.g. C E G#)
+
+To detect the chord in a bar: count how many times each of the 12 pitch classes appears
+across all notes in the bar (ignoring octave). Score every (root, quality) pair by how
+well the quality's interval pattern matches the histogram. Pick the best-scoring pair.
+If even the best score is low — the notes don't fit any clean pattern — label it OTHER.
+Empty bars are NONE.
+
+Total chord tokens: 12 roots × 5 qualities + OTHER + NONE = **62**.
+
+---
+
+### New files and changes
+
+| File | What changes |
+|---|---|
+| `data_management/expert_descriptions.py` | Add `detect_chord()` for chord detection per bar |
+| `data_management/tokenizing_remi.py` | New file. REMI+ tokenizer. Produces `note_tokens`, `desc_tokens`, `bar_map` arrays. Two separate vocab dicts. |
+| `data_management/adl_filter.py` | New file. Scan ADL corpus, write `adl_piano_files.txt`. |
+| `model/models/DescriptionEncoder.py` | New file. 2-layer bidirectional transformer encoder. |
+| `model/models/TransformerBlock.py` | Add cross-attention sub-layer (optional, off by default for backwards compat). |
+| `model/models/GPTMidiV2.py` | New file. Decoder wrapping TransformerBlocks with cross-attention enabled. Handles bar-level encoder state routing. |
+| `model/training/data.py` | Update dataset class to load and return `(note_tokens, desc_tokens, bar_map)` triples. |
+| `model/training/training_loop.py` | Update forward pass to run encoder, gather per-position states, pass to decoder. |
+| `model/inference/base_inference.py` | Bar-by-bar generation loop: encode description, decode notes, repeat. |
+| `serve/schemas/generate.py` | Add `descriptions` field: list of per-bar feature dicts or seed MIDI path. |
+
+---
+
+### Implementation order
 
 1. ✓ `remi_bar_exploration.ipynb` — bar parsing confirmed, `fit_boundaries()` updated to accept glob
-2. ✓ `expert_descriptions.py` — bar feature extraction complete
-3. Survey functions (add to `expert_descriptions.py`):
-   - `survey_bars_per_window()` → determines MAX_BARS_PER_WINDOW for BAR_i vocab
-   - Chord distribution survey → validates chord token taxonomy
-4. `tokenizing_remi.py` — full REMI+ tokenizer with extended vocab
-5. `adl_filter.py` — scan ADL, write `adl_piano_files.txt`
-6. Tokenize ADL corpus → `data/adl_tokenized_remi.npy`
-7. `model/models/DescriptionEncoder.py` — bidirectional encoder
-8. `model/models/TransformerBlock.py` — add CrossAttentionBlock
-9. `model/models/GPTMidiV2.py` — full encoder-decoder model
-10. `model/training/training_loop.py` — description loss masking, encoder state passing
-11. Train Round 2
-12. `model/inference/base_inference.py` + schema — two-phase inference
+2. ✓ `expert_descriptions.py` — bar feature extraction, boundary fitting complete
+3. Add `detect_chord()` and chord survey to `expert_descriptions.py`
+4. `tokenizing_remi.py` — REMI+ tokenizer producing the three-array output format
+5. `adl_filter.py` — scan and filter ADL corpus
+6. Tokenize ADL corpus → `data/adl_remi_notes.npy`, `data/adl_remi_desc.npy`, `data/adl_remi_barmap.npy`
+7. `model/models/DescriptionEncoder.py`
+8. `model/models/TransformerBlock.py` — add cross-attention sub-layer
+9. `model/models/GPTMidiV2.py`
+10. `model/training/data.py` — update dataset class
+11. `model/training/training_loop.py` — update forward pass
+12. Train Round 2
+13. `model/inference/base_inference.py` + schema updates
